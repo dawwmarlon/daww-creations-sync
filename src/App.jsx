@@ -64,9 +64,15 @@ const todayISO = () => new Date().toISOString().split("T")[0];
 const uid = () => Math.random().toString(36).slice(2,10);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PUSH NOTIFICATIONS
+// PUSH NOTIFICATIONS — Service Worker based (works on Android + iPhone)
 // ─────────────────────────────────────────────────────────────────────────────
-const VAPID_KEY = null; // Optional: add your VAPID key for full web push
+
+// Register the service worker on load
+if("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/firebase-messaging-sw.js")
+    .then(reg => console.log("SW registered:", reg.scope))
+    .catch(err => console.warn("SW registration failed:", err));
+}
 
 async function requestNotificationPermission() {
   if(!("Notification" in window)) return false;
@@ -76,20 +82,28 @@ async function requestNotificationPermission() {
   return result === "granted";
 }
 
-function sendNotification(title, body, icon = "/favicon.ico") {
+// Show a local notification via the Service Worker (works in background on Android)
+async function sendNotification(title, body) {
   if(!("Notification" in window)) return;
   if(Notification.permission !== "granted") return;
   try {
-    const n = new Notification(title, {
-      body,
-      icon,
-      badge: "/favicon.ico",
-      vibrate: [200, 100, 200],
-      tag: title, // prevents duplicate notifications
-      renotify: false,
-    });
-    n.onclick = () => { window.focus(); n.close(); };
-    setTimeout(() => n.close(), 6000);
+    // Use service worker to show notification — works in background
+    if("serviceWorker" in navigator) {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification(title, {
+        body,
+        icon: "/favicon.ico",
+        badge: "/favicon.ico",
+        vibrate: [200, 100, 200],
+        tag: title,
+        renotify: false,
+        requireInteraction: false,
+      });
+    } else {
+      // Fallback for browsers without SW support
+      const n = new Notification(title, { body, icon: "/favicon.ico" });
+      setTimeout(() => n.close(), 6000);
+    }
   } catch(e) { console.warn("Notification error:", e); }
 }
 
@@ -1268,9 +1282,11 @@ export default function DAWWApp() {
         {/* DASHBOARD */}
         {view==="dashboard"&&(
           <div style={{padding:"0 16px 32px",animation:"fadeUp .3s ease"}}>
+
+            {/* Welcome header */}
             <div style={{padding:"16px 0 6px"}}>
               <div style={{fontSize:20,fontWeight:800}}>Welcome, <span style={{color:C.redBright}}>{me.name.split(" ")[0]}</span> 👷</div>
-              <div style={{fontSize:12,color:C.textMuted,marginTop:3}}>{me.role} · {new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
+              <div style={{fontSize:12,color:C.textMuted,marginTop:3}}>{me.role}{me.title?` · "${me.title}"`:""} · {new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
               <div style={{display:"flex",alignItems:"center",gap:8,marginTop:12,marginBottom:16}}>
                 <div style={{flex:1,height:1,background:`linear-gradient(90deg,${C.redBright}66,transparent)`}}/>
                 <div style={{width:5,height:5,background:C.redBright,transform:"rotate(45deg)"}}/>
@@ -1286,8 +1302,9 @@ export default function DAWWApp() {
               </div>
             ))}
 
+            {/* Stats */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
-              {[{l:"Open Tasks",v:openTasks,c:C.redBright},{l:"Completed",v:doneTasks,c:C.green},{l:"Team",v:workers.length||1,c:C.taupe},{l:"Messages",v:messages.length,c:C.gold}].map(s=>(
+              {[{l:"Open Tasks",v:openTasks,c:C.redBright},{l:"Completed",v:doneTasks,c:C.green},{l:"Team Online",v:workers.filter(w=>w.online).length||1,c:C.taupe},{l:"Messages",v:messages.length,c:C.gold}].map(s=>(
                 <div key={s.l} style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderTop:`2px solid ${s.c}`,borderRadius:12,padding:14}}>
                   <div style={{fontSize:26,fontWeight:800,color:s.c,fontFamily:"'DM Mono',monospace"}}>{s.v}</div>
                   <div style={{fontSize:10,color:C.textMuted,marginTop:3,fontWeight:600}}>{s.l}</div>
@@ -1295,7 +1312,8 @@ export default function DAWWApp() {
               ))}
             </div>
 
-            <div style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:14,padding:16,marginBottom:14}}>
+            {/* Progress */}
+            <div style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:14,padding:16,marginBottom:16}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
                 <div style={{fontSize:13,fontWeight:700,color:C.taupeLight}}>Today's Progress</div>
                 <div style={{fontSize:14,fontWeight:800,color:C.redBright,fontFamily:"'DM Mono',monospace"}}>{pct}%</div>
@@ -1305,17 +1323,69 @@ export default function DAWWApp() {
             </div>
 
             {/* My upcoming deadlines */}
-            {tasks.filter(t=>t.assignee===me.name&&t.deadline&&!t.done).slice(0,3).map(t=>(
-              <div key={t.id} style={{background:C.surfaceHigh,border:`1px solid ${C.borderBright}`,borderRadius:10,padding:"10px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontSize:12,fontWeight:600}}>{t.title}</div>
-                  <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap"}}><DeadlinePill deadline={t.deadline}/>{t.delivery&&<span style={{fontSize:9,color:C.blue,fontFamily:"'DM Mono',monospace",fontWeight:700}}>📦 {fmtDate(t.delivery)}</span>}</div>
-                </div>
-                <PriBadge p={t.priority}/>
-              </div>
-            ))}
+            {tasks.filter(t=>t.assignee===me.name&&t.deadline&&!t.done).length>0&&(
+              <>
+                <div style={{fontSize:10,color:C.textMuted,fontWeight:700,letterSpacing:1.5,marginBottom:8,textTransform:"uppercase",fontFamily:"'DM Mono',monospace"}}>My Upcoming Deadlines</div>
+                {tasks.filter(t=>t.assignee===me.name&&t.deadline&&!t.done).slice(0,3).map(t=>(
+                  <div key={t.id} style={{background:C.surfaceHigh,border:`1px solid ${C.borderBright}`,borderRadius:10,padding:"10px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:600}}>{t.title}</div>
+                      <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap"}}><DeadlinePill deadline={t.deadline}/>{t.delivery&&<span style={{fontSize:9,color:C.blue,fontFamily:"'DM Mono',monospace",fontWeight:700}}>📦 {fmtDate(t.delivery)}</span>}</div>
+                    </div>
+                    <PriBadge p={t.priority}/>
+                  </div>
+                ))}
+              </>
+            )}
 
-            <button onClick={logout} style={{width:"100%",marginTop:20,padding:"10px",borderRadius:10,border:`1px solid ${C.border}`,background:"transparent",color:C.textDim,fontSize:12,fontWeight:600,cursor:"pointer"}}>Sign Out</button>
+            {/* ── TEAM ROSTER — visible to ALL workers on home screen ── */}
+            {workers.length>0&&(
+              <div style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:14,padding:16,marginBottom:16}}>
+                <div style={{fontSize:10,color:C.textMuted,fontWeight:700,letterSpacing:1.5,marginBottom:12,textTransform:"uppercase",fontFamily:"'DM Mono',monospace"}}>
+                  👥 DAWW CREATIONS Team · {workers.filter(w=>w.online).length} online
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {workers
+                    .sort((a,b)=>{
+                      // Sort: owner first, then admins, then workers
+                      const rank = w => (w.isOwner||w.name===OWNER_NAME||w.email===OWNER_EMAIL)?0:w.isAdmin?1:2;
+                      return rank(a)-rank(b);
+                    })
+                    .map((w,i)=>{
+                      const wOwner = w.isOwner||w.name===OWNER_NAME||w.email===OWNER_EMAIL;
+                      const wAdmin = w.isAdmin&&!wOwner;
+                      const isMe   = w.id===me.id||w.name===me.name;
+                      return (
+                        <div key={i} style={{
+                          display:"flex",alignItems:"center",gap:12,
+                          padding:"10px 12px",
+                          background:isMe?`${C.redBright}0a`:C.bg,
+                          borderRadius:10,
+                          border:`1px solid ${wOwner?C.goldBright+"33":wAdmin?C.purple+"33":isMe?C.redBright+"33":C.border}`,
+                        }}>
+                          <Avatar name={w.name} color={w.color||C.taupe} size={36} isOwner={wOwner} isAdmin={wAdmin}/>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                              <span style={{fontSize:13,fontWeight:700,color:C.text}}>{w.name}</span>
+                              {isMe&&<span style={{fontSize:9,color:C.textMuted}}>(you)</span>}
+                              {wOwner&&<span style={{fontSize:9,fontWeight:800,color:C.goldBright,background:`${C.goldBright}18`,borderRadius:4,padding:"1px 5px",fontFamily:"'DM Mono',monospace"}}>OWNER</span>}
+                              {wAdmin&&<span style={{fontSize:9,fontWeight:800,color:C.purple,background:`${C.purple}18`,borderRadius:4,padding:"1px 5px",fontFamily:"'DM Mono',monospace"}}>ADMIN</span>}
+                            </div>
+                            <div style={{fontSize:11,color:C.textMuted,marginTop:2}}>{w.role}</div>
+                            {w.title&&<div style={{fontSize:11,color:C.taupe,marginTop:1,fontStyle:"italic"}}>"{w.title}"</div>}
+                          </div>
+                          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,flexShrink:0}}>
+                            <div style={{width:8,height:8,borderRadius:"50%",background:w.online?C.green:C.textMuted,boxShadow:w.online?`0 0 6px ${C.green}`:""}}/>
+                            <span style={{fontSize:9,color:w.online?C.green:C.textMuted,fontFamily:"'DM Mono',monospace"}}>{w.online?"ON":"OFF"}</span>
+                          </div>
+                        </div>
+                      );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <button onClick={logout} style={{width:"100%",marginTop:4,padding:"10px",borderRadius:10,border:`1px solid ${C.border}`,background:"transparent",color:C.textDim,fontSize:12,fontWeight:600,cursor:"pointer"}}>Sign Out</button>
           </div>
         )}
 
