@@ -9,6 +9,7 @@ import {
   getDatabase, ref, push, onValue, set, update, remove, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DAWW CREATIONS — Full Platform v4
 // Owner: Marlon George — dawwmarlon@gmail.com
@@ -32,6 +33,64 @@ try {
   auth = getAuth(app);
   db   = getDatabase(app);
 } catch(e) { console.warn("Firebase:", e); }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLOUDINARY MEDIA UPLOAD (free — no credit card needed)
+// 1. Go to cloudinary.com → sign up free
+// 2. Go to Settings → Upload → Add upload preset → set to "Unsigned" → save
+// 3. Replace the two values below with your Cloud Name and Upload Preset
+// ─────────────────────────────────────────────────────────────────────────────
+const CLOUDINARY_CLOUD  = "dylmfc9fh";
+const CLOUDINARY_PRESET = "xtvdzlph";
+const CLOUDINARY_READY  = CLOUDINARY_CLOUD !== "REPLACE_WITH_YOUR_CLOUD_NAME";
+
+async function uploadToCloudinary(file, onProgress) {
+  if(!CLOUDINARY_READY) {
+    alert("Media uploads not set up yet.\nPlease follow the Cloudinary setup steps in the app.");
+    return null;
+  }
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", CLOUDINARY_PRESET);
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/auto/upload`);
+    xhr.upload.onprogress = e => {
+      if(e.lengthComputable) onProgress(Math.round(e.loaded/e.total*100));
+    };
+    xhr.onload = () => {
+      if(xhr.status === 200) {
+        const data = JSON.parse(xhr.responseText);
+        resolve(data.secure_url);
+      } else { reject(new Error("Upload failed")); }
+    };
+    xhr.onerror = () => reject(new Error("Network error"));
+    xhr.send(formData);
+  });
+}
+
+// Extract Cloudinary public_id from a URL for deletion tracking
+function getPublicId(url) {
+  try {
+    const parts = url.split("/upload/");
+    if(parts.length < 2) return null;
+    const afterUpload = parts[1];
+    // Remove version prefix (v12345/) if present
+    const withoutVersion = afterUpload.replace(/^v\d+\//, "");
+    // Remove file extension
+    return withoutVersion.replace(/\.[^/.]+$/, "");
+  } catch(e) { return null; }
+}
+
+// Format bytes into human-readable size
+function fmtBytes(bytes) {
+  if(!bytes) return "—";
+  if(bytes < 1024)       return bytes + " B";
+  if(bytes < 1048576)    return (bytes/1024).toFixed(1) + " KB";
+  if(bytes < 1073741824) return (bytes/1048576).toFixed(1) + " MB";
+  return (bytes/1073741824).toFixed(2) + " GB";
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS & HELPERS
@@ -516,30 +575,83 @@ function CalendarView({tasks, isOwner}) {
 // CHAT VIEW — with fully visible Edit & Delete buttons for all users
 // ─────────────────────────────────────────────────────────────────────────────
 function ChatView({me, messages, setMessages, isOwner}) {
-  const [channel,setChannel]   = useState("general");
-  const [input,setInput]       = useState("");
-  const [editing,setEditing]   = useState(null); // {id, text}
-  const [menuOpen,setMenuOpen] = useState(null); // msg id with open action menu
-  const bottomRef = useRef(null);
+  const [channel,setChannel]     = useState("general");
+  const [input,setInput]         = useState("");
+  const [editing,setEditing]     = useState(null);
+  const [uploading,setUploading] = useState(false);
+  const [uploadPct,setUploadPct] = useState(0);
+  const [recording,setRecording] = useState(false);
+  const [mediaRec,setMediaRec]   = useState(null);
+  const bottomRef  = useRef(null);
+  const fileRef    = useRef(null);
+  const videoRef   = useRef(null);
+  const accentCol  = isOwner ? C.goldBright : C.redBright;
 
   useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:"smooth"}); },[messages,channel]);
 
-  // Close menu when tapping elsewhere
-  useEffect(()=>{
-    const close = ()=>setMenuOpen(null);
-    document.addEventListener("click", close);
-    return ()=>document.removeEventListener("click", close);
-  },[]);
-
+  // ── Send text ─────────────────────────────────────────────────────────────
   const send = () => {
     if(!input.trim()) return;
     const time = new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
-    const msg = {uid:me.id, name:me.name, color:me.color, isOwner:me.isOwner||false, text:input.trim(), time, channel, ts:Date.now(), edited:false};
+    const msg = {uid:me.id,name:me.name,color:me.color,isOwner:me.isOwner||false,text:input.trim(),time,channel,ts:Date.now(),edited:false,type:"text"};
     if(db) push(ref(db,"messages"),msg);
     else setMessages(m=>[...m,{...msg,id:uid()}]);
     setInput("");
   };
 
+  // ── Upload via Cloudinary (free) then save message to Firebase ───────────
+  const uploadFile = async (file, type) => {
+    if(!file) return;
+    if(!CLOUDINARY_READY) {
+      alert("⚠️ Media uploads need Cloudinary setup.\n\nSteps:\n1. Go to cloudinary.com → sign up free\n2. Settings → Upload → Add upload preset → Unsigned\n3. Copy your Cloud Name + Preset into the app code");
+      return;
+    }
+    setUploading(true); setUploadPct(0);
+    try {
+      const url = await uploadToCloudinary(file, pct => setUploadPct(pct));
+      if(!url) { setUploading(false); return; }
+      const time = new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+      const msg = {
+        uid:me.id, name:me.name, color:me.color,
+        isOwner:me.isOwner||false,
+        text: type==="image"?"📷 Image":type==="video"?"🎥 Video":"🎤 Voice message",
+        mediaUrl:url, mediaType:type,
+        time, channel, ts:Date.now(), edited:false, type,
+      };
+      if(db) push(ref(db,"messages"),msg);
+      else setMessages(m=>[...m,{...msg,id:uid()}]);
+    } catch(e) {
+      console.error("Upload error:", e);
+      alert("Upload failed. Please check your internet connection and try again.");
+    }
+    setUploading(false); setUploadPct(0);
+  };
+
+  // ── Voice recording ───────────────────────────────────────────────────────
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      const rec    = new MediaRecorder(stream);
+      const chunks = [];
+      rec.ondataavailable = e => chunks.push(e.data);
+      rec.onstop = () => {
+        const blob = new Blob(chunks, {type:"audio/webm"});
+        const file = new File([blob], "voice.webm", {type:"audio/webm"});
+        uploadFile(file, "voice");
+        stream.getTracks().forEach(t=>t.stop());
+      };
+      rec.start();
+      setMediaRec(rec);
+      setRecording(true);
+    } catch(e) { alert("Microphone access denied. Please allow microphone in your browser settings."); }
+  };
+
+  const stopRecording = () => {
+    if(mediaRec) { mediaRec.stop(); setMediaRec(null); }
+    setRecording(false);
+  };
+
+  // ── Edit / Delete ─────────────────────────────────────────────────────────
   const saveEdit = (id) => {
     if(!editing?.text.trim()) return;
     if(db) update(ref(db,`messages/${id}`),{text:editing.text.trim(),edited:true});
@@ -551,13 +663,40 @@ function ChatView({me, messages, setMessages, isOwner}) {
     if(!window.confirm("Delete this message?")) return;
     if(db) remove(ref(db,`messages/${id}`));
     else setMessages(ms=>ms.filter(m=>m.id!==id));
-    setMenuOpen(null);
   };
 
   const visible = messages.filter(m=>m.channel===channel);
 
+  // ── Message bubble content ────────────────────────────────────────────────
+  const renderContent = (msg) => {
+    if(msg.mediaType==="image" && msg.mediaUrl) return (
+      <div style={{borderRadius:10,overflow:"hidden",maxWidth:240}}>
+        <img src={msg.mediaUrl} alt="Image" style={{width:"100%",display:"block",borderRadius:10,cursor:"pointer"}}
+          onClick={()=>window.open(msg.mediaUrl,"_blank")}/>
+      </div>
+    );
+    if(msg.mediaType==="video" && msg.mediaUrl) return (
+      <div style={{borderRadius:10,overflow:"hidden",maxWidth:240}}>
+        <video src={msg.mediaUrl} controls playsInline style={{width:"100%",display:"block",borderRadius:10,maxHeight:200}}/>
+      </div>
+    );
+    if(msg.mediaType==="voice" && msg.mediaUrl) return (
+      <div style={{background:`${C.purple}22`,border:`1px solid ${C.purple}44`,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10,minWidth:180}}>
+        <div style={{fontSize:20}}>🎤</div>
+        <audio src={msg.mediaUrl} controls style={{flex:1,height:32,outline:"none"}}/>
+      </div>
+    );
+    return <span style={{fontSize:13,lineHeight:1.6,wordBreak:"break-word"}}>{msg.text}</span>;
+  };
+
   return (
     <div style={{display:"flex",flexDirection:"column",flex:1,minHeight:"calc(100vh - 145px)",animation:"fadeUp .3s ease"}}>
+
+      {/* Hidden file inputs */}
+      <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}}
+        onChange={e=>{ if(e.target.files[0]) uploadFile(e.target.files[0],"image"); e.target.value=""; }}/>
+      <input ref={videoRef} type="file" accept="video/*" style={{display:"none"}}
+        onChange={e=>{ if(e.target.files[0]) uploadFile(e.target.files[0],"video"); e.target.value=""; }}/>
 
       {/* Channels */}
       <div style={{display:"flex",gap:6,padding:"8px 16px",borderBottom:`1px solid ${C.border}`,overflowX:"auto"}}>
@@ -565,6 +704,28 @@ function ChatView({me, messages, setMessages, isOwner}) {
           <button key={ch} onClick={()=>setChannel(ch)} style={{padding:"5px 12px",borderRadius:8,fontSize:10,fontWeight:700,border:`1px solid ${channel===ch?C.redBright:C.border}`,background:channel===ch?C.redDim:"transparent",color:channel===ch?C.redBright:C.textMuted,cursor:"pointer",whiteSpace:"nowrap",textTransform:"uppercase",letterSpacing:.8,fontFamily:"'DM Mono',monospace"}}>#{ch}</button>
         ))}
       </div>
+
+      {/* Upload progress bar */}
+      {uploading && (
+        <div style={{padding:"6px 16px",background:C.surfaceHigh,borderBottom:`1px solid ${C.border}`}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+            <span style={{fontSize:11,color:C.textMuted}}>Uploading…</span>
+            <span style={{fontSize:11,color:accentCol,fontFamily:"'DM Mono',monospace",fontWeight:700}}>{uploadPct}%</span>
+          </div>
+          <div style={{background:C.border,borderRadius:99,height:3,overflow:"hidden"}}>
+            <div style={{width:`${uploadPct}%`,height:"100%",background:`linear-gradient(90deg,${accentCol},${accentCol}99)`,borderRadius:99,transition:"width .3s ease"}}/>
+          </div>
+        </div>
+      )}
+
+      {/* Recording indicator */}
+      {recording && (
+        <div style={{padding:"8px 16px",background:`${C.alert}18`,borderBottom:`1px solid ${C.alert}33`,display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:C.alert,animation:"pulse 1s infinite"}}/>
+          <span style={{fontSize:12,color:C.alert,fontWeight:700}}>Recording… tap Stop when done</span>
+          <button onClick={stopRecording} style={{marginLeft:"auto",background:C.alert,border:"none",borderRadius:8,padding:"5px 14px",cursor:"pointer",fontSize:12,color:"white",fontWeight:800}}>⏹ Stop</button>
+        </div>
+      )}
 
       {/* Messages */}
       <div style={{flex:1,overflowY:"auto",padding:"14px 16px",display:"flex",flexDirection:"column",gap:14}}>
@@ -575,20 +736,19 @@ function ChatView({me, messages, setMessages, isOwner}) {
         )}
 
         {visible.map((msg,i)=>{
-          const isMine = msg.uid===me.id || msg.name===me.name;
+          const isMine    = msg.uid===me.id || msg.name===me.name;
           const canDelete = isMine || isOwner;
-          const canEdit   = isMine;
+          const canEdit   = isMine && (!msg.mediaType || msg.mediaType==="text");
           const prevSame  = i>0 && visible[i-1].name===msg.name;
           const msgOwner  = msg.isOwner||msg.name===OWNER_NAME;
           const isEditing = editing?.id===msg.id;
-          const isMenuOpen = menuOpen===msg.id;
 
           return (
-            <div key={msg.id} style={{display:"flex",gap:10,flexDirection:isMine?"row-reverse":"row",animation:"fadeUp .2s ease",position:"relative"}}>
+            <div key={msg.id} style={{display:"flex",gap:10,flexDirection:isMine?"row-reverse":"row",animation:"fadeUp .2s ease"}}>
               {!isMine&&!prevSame && <Avatar name={msg.name} color={msg.color||C.taupe} size={30} isOwner={msgOwner}/>}
-              {!isMine&&prevSame && <div style={{width:30}}/>}
+              {!isMine&&prevSame  && <div style={{width:30}}/>}
 
-              <div style={{maxWidth:"75%",display:"flex",flexDirection:"column",alignItems:isMine?"flex-end":"flex-start"}}>
+              <div style={{maxWidth:"78%",display:"flex",flexDirection:"column",alignItems:isMine?"flex-end":"flex-start"}}>
 
                 {/* Sender name */}
                 {!prevSame&&!isMine && (
@@ -597,12 +757,10 @@ function ChatView({me, messages, setMessages, isOwner}) {
                   </div>
                 )}
 
-                {/* Edit mode */}
                 {isEditing ? (
                   <div style={{display:"flex",gap:6,flexDirection:"column",width:"100%"}}>
                     <textarea value={editing.text} onChange={e=>setEditing(ed=>({...ed,text:e.target.value}))}
-                      rows={3}
-                      style={{background:C.surfaceHigh,border:`1px solid ${C.redBright}66`,borderRadius:10,padding:"10px 13px",fontSize:13,color:C.text,outline:"none",resize:"vertical",fontFamily:"'Sora',sans-serif",minWidth:200}}/>
+                      rows={3} style={{background:C.surfaceHigh,border:`1px solid ${C.redBright}66`,borderRadius:10,padding:"10px 13px",fontSize:13,color:C.text,outline:"none",resize:"vertical",fontFamily:"'Sora',sans-serif",minWidth:200}}/>
                     <div style={{display:"flex",gap:8}}>
                       <button onClick={()=>saveEdit(msg.id)} style={{flex:1,background:`linear-gradient(135deg,${C.green},#2e7d52)`,border:"none",borderRadius:8,padding:"8px",cursor:"pointer",fontSize:12,color:"white",fontWeight:800}}>✓ Save</button>
                       <button onClick={()=>setEditing(null)} style={{flex:1,background:"transparent",border:`1px solid ${C.border}`,borderRadius:8,padding:"8px",cursor:"pointer",fontSize:12,color:C.textMuted,fontWeight:700}}>✕ Cancel</button>
@@ -610,29 +768,28 @@ function ChatView({me, messages, setMessages, isOwner}) {
                   </div>
                 ) : (
                   <>
-                    {/* Message bubble */}
-                    <div style={{background:isMine?C.redDim:msgOwner?`${C.goldBright}12`:C.surfaceHigh,border:`1px solid ${isMine?C.redBright+"55":msgOwner?C.goldBright+"44":C.border}`,borderRadius:isMine?"16px 4px 16px 16px":"4px 16px 16px 16px",padding:"10px 14px",fontSize:13,color:C.text,lineHeight:1.6,wordBreak:"break-word"}}>
-                      {msg.text}
+                    {/* Bubble */}
+                    <div style={{
+                      background:isMine?C.redDim:msgOwner?`${C.goldBright}12`:C.surfaceHigh,
+                      border:`1px solid ${isMine?C.redBright+"55":msgOwner?C.goldBright+"44":C.border}`,
+                      borderRadius:isMine?"16px 4px 16px 16px":"4px 16px 16px 16px",
+                      padding:msg.mediaType&&msg.mediaType!=="text"?"6px":"10px 14px",
+                      overflow:"hidden",
+                    }}>
+                      {renderContent(msg)}
                     </div>
 
-                    {/* Time + action buttons row — ALWAYS VISIBLE for own messages */}
-                    <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5,flexDirection:isMine?"row":"row"}}>
-                      {isMine && <span style={{fontSize:10,color:C.textMuted}}>{msg.time}{msg.edited?" · edited":""}</span>}
-                      {!isMine && msg.edited && <span style={{fontSize:10,color:C.textMuted,marginLeft:4}}>(edited)</span>}
-
-                      {/* Edit button — own messages only */}
+                    {/* Action row */}
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5,flexWrap:"wrap",justifyContent:isMine?"flex-end":"flex-start"}}>
+                      <span style={{fontSize:10,color:C.textMuted}}>{msg.time}{msg.edited?" · edited":""}</span>
                       {canEdit && (
-                        <button
-                          onClick={e=>{e.stopPropagation();setEditing({id:msg.id,text:msg.text});setMenuOpen(null);}}
+                        <button onClick={e=>{e.stopPropagation();setEditing({id:msg.id,text:msg.text});}}
                           style={{display:"flex",alignItems:"center",gap:4,background:C.surfaceHigh,border:`1px solid ${C.borderBright}`,borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:11,color:C.textDim,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>
                           ✏ Edit
                         </button>
                       )}
-
-                      {/* Delete button — own messages + owner can delete anyone */}
                       {canDelete && (
-                        <button
-                          onClick={e=>{e.stopPropagation();deleteMsg(msg.id);}}
+                        <button onClick={e=>{e.stopPropagation();deleteMsg(msg.id);}}
                           style={{display:"flex",alignItems:"center",gap:4,background:C.alertDim,border:`1px solid ${C.alert}44`,borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:11,color:C.alert,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>
                           🗑 Delete
                         </button>
@@ -647,12 +804,41 @@ function ChatView({me, messages, setMessages, isOwner}) {
         <div ref={bottomRef}/>
       </div>
 
-      {/* Input */}
-      <div style={{padding:"10px 16px 16px",borderTop:`1px solid ${C.border}`,display:"flex",gap:8}}>
-        <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()}
-          placeholder={`Message #${channel}…`}
-          style={{flex:1,background:C.surfaceHigh,border:`1px solid ${isOwner?C.goldBright+"44":C.borderBright}`,borderRadius:10,padding:"10px 14px",fontSize:13,color:C.text,outline:"none"}}/>
-        <button onClick={send} style={{background:isOwner?`linear-gradient(135deg,${C.goldBright},#a07020)`:`linear-gradient(135deg,${C.redBright},#7a1010)`,border:"none",borderRadius:10,padding:"10px 18px",cursor:"pointer",fontSize:15,color:isOwner?C.bg:"white",fontWeight:900}}>↑</button>
+      {/* Input bar with media buttons */}
+      <div style={{padding:"10px 16px 16px",borderTop:`1px solid ${C.border}`}}>
+        {/* Media buttons row */}
+        <div style={{display:"flex",gap:6,marginBottom:8}}>
+          {[
+            {icon:"📷", label:"Photo",  action:()=>fileRef.current?.click(),   color:C.blue},
+            {icon:"🎥", label:"Video",  action:()=>videoRef.current?.click(),  color:C.purple},
+            {icon:"🎤", label:recording?"Stop":"Voice", action:recording?stopRecording:startRecording, color:recording?C.alert:C.green},
+          ].map(btn=>(
+            <button key={btn.label} onClick={btn.action} disabled={uploading} style={{
+              display:"flex",alignItems:"center",gap:5,
+              padding:"6px 12px",borderRadius:8,
+              background:`${btn.color}18`,border:`1px solid ${btn.color}44`,
+              color:btn.color,fontSize:12,fontWeight:700,cursor:uploading?"not-allowed":"pointer",
+              opacity:uploading?0.5:1,fontFamily:"'DM Mono',monospace",
+              animation:recording&&btn.label==="Stop"?"pulse 1s infinite":"none",
+            }}>
+              <span>{btn.icon}</span>{btn.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Text input + send */}
+        <div style={{display:"flex",gap:8}}>
+          <input value={input} onChange={e=>setInput(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&send()}
+            placeholder={`Message #${channel}…`}
+            style={{flex:1,background:C.surfaceHigh,border:`1px solid ${isOwner?C.goldBright+"44":C.borderBright}`,borderRadius:10,padding:"10px 14px",fontSize:13,color:C.text,outline:"none"}}/>
+          <button onClick={send} disabled={uploading} style={{
+            background:isOwner?`linear-gradient(135deg,${C.goldBright},#a07020)`:`linear-gradient(135deg,${C.redBright},#7a1010)`,
+            border:"none",borderRadius:10,padding:"10px 18px",
+            cursor:uploading?"not-allowed":"pointer",fontSize:15,
+            color:isOwner?C.bg:"white",fontWeight:900,opacity:uploading?0.5:1,
+          }}>↑</button>
+        </div>
       </div>
     </div>
   );
@@ -662,9 +848,11 @@ function ChatView({me, messages, setMessages, isOwner}) {
 // OWNER DASHBOARD
 // ─────────────────────────────────────────────────────────────────────────────
 function OwnerDashboard({me, tasks, setTasks, workers, setWorkers, messages, setMessages, isOwner=false}) {
-  const [showAdd,setShowAdd] = useState(false);
-  const [f,setF] = useState({title:"",pri:"high",project:"Operations",assignee:"",deadline:"",delivery:"",note:""});
-  const [announce,setAnnounce] = useState("");
+  const [showAdd,setShowAdd]       = useState(false);
+  const [f,setF]                   = useState({title:"",pri:"high",project:"Operations",assignee:"",deadline:"",delivery:"",note:""});
+  const [announce,setAnnounce]     = useState("");
+  const [activeTab,setActiveTab]   = useState("overview"); // overview | media | team
+  const [mediaFilter,setMediaFilter] = useState("all"); // all | image | video | voice
 
   const openTasks = tasks.filter(t=>!t.done).length;
   const doneTasks = tasks.filter(t=>t.done).length;
@@ -752,79 +940,28 @@ function OwnerDashboard({me, tasks, setTasks, workers, setWorkers, messages, set
         ))}
       </div>
 
-      {/* Pin announcement */}
-      <div style={{background:C.surfaceHigh,border:`1px solid ${C.goldBright}33`,borderRadius:14,padding:16,marginBottom:14}}>
-        <div style={{fontSize:11,color:C.goldBright,fontWeight:700,letterSpacing:1.5,marginBottom:10,fontFamily:"'DM Mono',monospace"}}>📌 PIN ANNOUNCEMENT</div>
-        <div style={{display:"flex",gap:8}}>
-          <input value={announce} onChange={e=>setAnnounce(e.target.value)} onKeyDown={e=>e.key==="Enter"&&pinAnnounce()}
-            placeholder="Important message for the whole team…"
-            style={{flex:1,background:C.bg,border:`1px solid ${C.borderBright}`,borderRadius:8,padding:"9px 12px",fontSize:12,color:C.text,outline:"none"}}/>
-          <button onClick={pinAnnounce} style={{background:`linear-gradient(135deg,${C.goldBright},#a07020)`,border:"none",borderRadius:8,padding:"9px 14px",cursor:"pointer",fontSize:12,color:C.bg,fontWeight:800}}>Pin</button>
-        </div>
-      </div>
 
-      {/* Add task */}
-      <div style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:14,padding:16,marginBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showAdd?14:0}}>
-          <div style={{fontSize:11,color:C.redBright,fontWeight:700,letterSpacing:1.5,fontFamily:"'DM Mono',monospace"}}>➕ ADD TASK</div>
-          <button onClick={()=>setShowAdd(s=>!s)} style={{background:showAdd?C.redDim:`linear-gradient(135deg,${C.redBright},#7a1010)`,border:`1px solid ${C.redBright}44`,borderRadius:8,padding:"5px 14px",cursor:"pointer",fontSize:11,color:showAdd?C.redBright:"white",fontWeight:700}}>
-            {showAdd?"Cancel":"+ New Task"}
+
+      {/* Tab navigation */}
+      <div style={{display:"flex",gap:6,marginBottom:16,background:C.surfaceHigh,borderRadius:10,padding:3}}>
+        {[["overview","📋 Overview"],["media","🗂 Media"],["team","👥 Team"]].map(([tab,label])=>(
+          <button key={tab} onClick={()=>setActiveTab(tab)} style={{flex:1,padding:"8px 4px",borderRadius:8,border:"none",background:activeTab===tab?C.redBright:"transparent",color:activeTab===tab?"white":C.textMuted,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'DM Mono',monospace",transition:"all .2s"}}>
+            {label}
           </button>
-        </div>
-        {showAdd && (
-          <div>
-            {field("TASK TITLE","title","text","What needs to be done?")}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-              <div>
-                <div style={{fontSize:10,color:C.textMuted,fontWeight:700,letterSpacing:1,marginBottom:4,fontFamily:"'DM Mono',monospace"}}>PRIORITY</div>
-                <select value={f.pri} onChange={e=>setF(x=>({...x,pri:e.target.value}))} style={{width:"100%",background:C.bg,border:`1px solid ${C.borderBright}`,borderRadius:8,padding:"8px 10px",fontSize:12,color:C.text,outline:"none"}}>
-                  <option value="high">HIGH</option><option value="med">MED</option><option value="low">LOW</option>
-                </select>
-              </div>
-              <div>
-                <div style={{fontSize:10,color:C.textMuted,fontWeight:700,letterSpacing:1,marginBottom:4,fontFamily:"'DM Mono',monospace"}}>PROJECT</div>
-                <select value={f.project} onChange={e=>setF(x=>({...x,project:e.target.value}))} style={{width:"100%",background:C.bg,border:`1px solid ${C.borderBright}`,borderRadius:8,padding:"8px 10px",fontSize:12,color:C.text,outline:"none"}}>
-                  {PROJECTS.map(p=><option key={p} value={p}>{p}</option>)}
-                </select>
-              </div>
-            </div>
-            <div style={{marginBottom:10}}>
-              <div style={{fontSize:10,color:C.textMuted,fontWeight:700,letterSpacing:1,marginBottom:4,fontFamily:"'DM Mono',monospace"}}>ASSIGN TO</div>
-              <select value={f.assignee} onChange={e=>setF(x=>({...x,assignee:e.target.value}))} style={{width:"100%",background:C.bg,border:`1px solid ${C.borderBright}`,borderRadius:8,padding:"8px 10px",fontSize:12,color:C.text,outline:"none"}}>
-                <option value="">— Unassigned —</option>
-                {workers.map(w=><option key={w.id} value={w.name}>{w.name} ({w.role})</option>)}
-              </select>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {field("DEADLINE","deadline","date")}
-              {field("DELIVERY DATE","delivery","date")}
-            </div>
-            {field("NOTE (optional)","note","text","Any extra details…")}
-            <button onClick={addTask} style={{width:"100%",padding:"11px",borderRadius:10,border:"none",background:`linear-gradient(135deg,${C.redBright},#7a1010)`,color:"white",fontSize:13,fontWeight:800,cursor:"pointer",boxShadow:`0 0 12px ${C.redGlow}`}}>Create Task →</button>
-          </div>
-        )}
-      </div>
-
-      {/* All tasks */}
-      <div style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:14,padding:16,marginBottom:14}}>
-        <div style={{fontSize:11,color:C.redBright,fontWeight:700,letterSpacing:1.5,marginBottom:12,fontFamily:"'DM Mono',monospace"}}>🗂 ALL TASKS</div>
-        {tasks.length===0 && <div style={{fontSize:12,color:C.textMuted}}>No tasks yet.</div>}
-        {tasks.map(t=>(
-          <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:C.bg,borderRadius:8,border:`1px solid ${t.done?C.border:C.borderBright}`,marginBottom:6,opacity:t.done?.45:1}}>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:12,fontWeight:600,color:C.text,textDecoration:t.done?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.title}</div>
-              <div style={{display:"flex",gap:6,marginTop:3,flexWrap:"wrap",alignItems:"center"}}>
-                <PriBadge p={t.priority}/>
-                {t.assignee&&<span style={{fontSize:10,color:C.taupe}}>→ {t.assignee}</span>}
-                {t.deadline&&<DeadlinePill deadline={t.deadline}/>}
-                {t.delivery&&<span style={{fontSize:9,color:C.blue,fontFamily:"'DM Mono',monospace",fontWeight:700}}>📦 {fmtDate(t.delivery)}</span>}
-              </div>
-            </div>
-            <button onClick={e=>deleteTask(t,e)} style={{background:C.alertDim,border:`1px solid ${C.alert}33`,borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:11,color:C.alert,fontWeight:700,flexShrink:0}}>✕</button>
-          </div>
         ))}
       </div>
 
+      {/* ── OVERVIEW TAB ── */}
+      {activeTab==="overview" && <>
+
+
+      </> }
+
+      {/* ── MEDIA MANAGER TAB ── */}
+      {activeTab==="media" && <MediaManager messages={messages} setMessages={setMessages} isOwner={isOwner}/>}
+
+      {/* ── TEAM TAB ── */}
+      {activeTab==="team" && <>
       {/* Team management */}
       <div style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:14,padding:16}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -911,6 +1048,172 @@ function OwnerDashboard({me, tasks, setTasks, workers, setWorkers, messages, set
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MEDIA MANAGER — Owner only, shows all uploaded files with delete option
+// ─────────────────────────────────────────────────────────────────────────────
+function MediaManager({messages, setMessages}) {
+  const [filter, setFilter]       = useState("all");
+  const [deleting, setDeleting]   = useState(null);
+  const [preview, setPreview]     = useState(null);
+
+  // Get all media messages
+  const mediaMessages = messages.filter(m => m.mediaUrl && m.mediaType);
+
+  const filtered = filter==="all" ? mediaMessages
+    : mediaMessages.filter(m => m.mediaType===filter);
+
+  // Count by type
+  const counts = {
+    all:   mediaMessages.length,
+    image: mediaMessages.filter(m=>m.mediaType==="image").length,
+    video: mediaMessages.filter(m=>m.mediaType==="video").length,
+    voice: mediaMessages.filter(m=>m.mediaType==="voice").length,
+  };
+
+  const deleteMedia = async (msg) => {
+    if(!window.confirm(`Delete this ${msg.mediaType} from the chat?\n\nThis removes it from the chat. To also free storage on Cloudinary, delete it from your Cloudinary dashboard.`)) return;
+    setDeleting(msg.id);
+    // Remove from Firebase messages
+    try {
+      if(db) await remove(ref(db, `messages/${msg.id}`));
+      else setMessages(ms => ms.filter(m => m.id !== msg.id));
+    } catch(e) { console.error(e); }
+    setDeleting(null);
+  };
+
+  const deleteAllOfType = async (type) => {
+    const toDelete = mediaMessages.filter(m => type==="all" ? true : m.mediaType===type);
+    if(toDelete.length===0) { alert("Nothing to delete."); return; }
+    if(!window.confirm(`Delete ALL ${toDelete.length} ${type==="all"?"media files":type+" files"} from chat?\n\nThis cannot be undone.`)) return;
+    for(const msg of toDelete) {
+      if(db) await remove(ref(db, `messages/${msg.id}`));
+    }
+    if(!db) setMessages(ms => ms.filter(m => !toDelete.find(d=>d.id===m.id)));
+    alert(`Deleted ${toDelete.length} file${toDelete.length!==1?"s":""}. ✓`);
+  };
+
+  const typeIcon  = t => t==="image"?"📷":t==="video"?"🎥":"🎤";
+  const typeColor = t => t==="image"?C.blue:t==="video"?C.purple:C.green;
+
+  return (
+    <div style={{animation:"fadeUp .3s ease"}}>
+
+      {/* Storage tip */}
+      <div style={{background:`${C.amber}12`,border:`1px solid ${C.amber}33`,borderRadius:12,padding:"12px 14px",marginBottom:16}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.amber,marginBottom:4}}>💡 Free up Cloudinary space</div>
+        <div style={{fontSize:11,color:C.textDim,lineHeight:1.7}}>
+          Deleting here removes files from the chat. To fully free Cloudinary storage, also delete them at <span style={{color:C.amber,fontWeight:700}}>cloudinary.com → Media Library</span>. You have 25GB free — use the filters below to find and clear old files.
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16}}>
+        {[["all","All",C.taupe],["image","Photos",C.blue],["video","Videos",C.purple],["voice","Audio",C.green]].map(([type,label,col])=>(
+          <div key={type} onClick={()=>setFilter(type)} style={{
+            background:filter===type?`${col}22`:C.surfaceHigh,
+            border:`1px solid ${filter===type?col:C.border}`,
+            borderRadius:10,padding:"10px 6px",textAlign:"center",cursor:"pointer",
+            transition:"all .2s",
+          }}>
+            <div style={{fontSize:18,marginBottom:2}}>{type==="all"?"🗂":typeIcon(type)}</div>
+            <div style={{fontSize:16,fontWeight:800,color:col,fontFamily:"'DM Mono',monospace"}}>{counts[type]}</div>
+            <div style={{fontSize:9,color:C.textMuted,fontWeight:600,letterSpacing:.5}}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Bulk delete */}
+      {filtered.length>0 && (
+        <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
+          <button onClick={()=>deleteAllOfType(filter)} style={{
+            background:C.alertDim,border:`1px solid ${C.alert}44`,borderRadius:8,
+            padding:"6px 14px",cursor:"pointer",fontSize:11,color:C.alert,fontWeight:700,
+            fontFamily:"'DM Mono',monospace",
+          }}>
+            🗑 Delete All {filter==="all"?"Media":filter.charAt(0).toUpperCase()+filter.slice(1)+"s"} ({filtered.length})
+          </button>
+        </div>
+      )}
+
+      {/* Media grid */}
+      {filtered.length===0 && (
+        <div style={{textAlign:"center",padding:"40px 0",color:C.textMuted,fontSize:13}}>
+          No {filter==="all"?"media files":filter+" files"} found in chat.
+        </div>
+      )}
+
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {filtered.map(msg=>(
+          <div key={msg.id} style={{
+            background:C.surfaceHigh,border:`1px solid ${C.border}`,
+            borderRadius:12,overflow:"hidden",
+          }}>
+            <div style={{display:"flex",gap:10,padding:"10px 12px",alignItems:"center"}}>
+
+              {/* Thumbnail / preview */}
+              <div style={{width:52,height:52,borderRadius:8,overflow:"hidden",flexShrink:0,background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}
+                onClick={()=>setPreview(msg)}>
+                {msg.mediaType==="image" && (
+                  <img src={msg.mediaUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                )}
+                {msg.mediaType==="video" && (
+                  <div style={{fontSize:24}}>🎥</div>
+                )}
+                {msg.mediaType==="voice" && (
+                  <div style={{fontSize:24}}>🎤</div>
+                )}
+              </div>
+
+              {/* Info */}
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                  <span style={{fontSize:10,fontWeight:800,color:typeColor(msg.mediaType),background:`${typeColor(msg.mediaType)}18`,border:`1px solid ${typeColor(msg.mediaType)}33`,borderRadius:4,padding:"1px 6px",fontFamily:"'DM Mono',monospace",textTransform:"uppercase"}}>
+                    {typeIcon(msg.mediaType)} {msg.mediaType}
+                  </span>
+                  <span style={{fontSize:10,color:C.textMuted}}>#{msg.channel}</span>
+                </div>
+                <div style={{fontSize:12,fontWeight:600,color:C.text}}>Sent by {msg.name}</div>
+                <div style={{fontSize:10,color:C.textMuted,marginTop:1}}>{msg.time} · {new Date(msg.ts||0).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
+              </div>
+
+              {/* Actions */}
+              <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
+                <button onClick={()=>window.open(msg.mediaUrl,"_blank")} style={{background:`${C.blue}18`,border:`1px solid ${C.blue}33`,borderRadius:6,padding:"5px 10px",cursor:"pointer",fontSize:11,color:C.blue,fontWeight:700}}>
+                  View
+                </button>
+                <button onClick={()=>deleteMedia(msg)} disabled={deleting===msg.id} style={{background:C.alertDim,border:`1px solid ${C.alert}33`,borderRadius:6,padding:"5px 10px",cursor:"pointer",fontSize:11,color:C.alert,fontWeight:700,opacity:deleting===msg.id?.5:1}}>
+                  {deleting===msg.id?"…":"Delete"}
+                </button>
+              </div>
+            </div>
+
+            {/* Inline preview for voice */}
+            {msg.mediaType==="voice" && (
+              <div style={{padding:"0 12px 12px"}}>
+                <audio src={msg.mediaUrl} controls style={{width:"100%",height:32}}/>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Full image/video preview modal */}
+      {preview && (
+        <div onClick={()=>setPreview(null)} style={{
+          position:"fixed",top:0,left:0,right:0,bottom:0,
+          background:"rgba(0,0,0,0.92)",zIndex:999,
+          display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,
+        }}>
+          <button onClick={()=>setPreview(null)} style={{position:"absolute",top:16,right:16,background:`${C.alert}22`,border:`1px solid ${C.alert}44`,borderRadius:"50%",width:36,height:36,cursor:"pointer",fontSize:16,color:C.alert,fontWeight:800}}>✕</button>
+          {preview.mediaType==="image" && <img src={preview.mediaUrl} alt="" style={{maxWidth:"100%",maxHeight:"80vh",borderRadius:12,objectFit:"contain"}}/>}
+          {preview.mediaType==="video" && <video src={preview.mediaUrl} controls autoPlay style={{maxWidth:"100%",maxHeight:"80vh",borderRadius:12}}/>}
+          <div style={{marginTop:12,fontSize:12,color:C.textMuted}}>Sent by {preview.name} · {preview.time}</div>
+        </div>
+      )}
     </div>
   );
 }
