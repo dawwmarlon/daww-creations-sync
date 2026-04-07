@@ -1102,11 +1102,25 @@ function MediaManager({messages, setMessages}) {
   return (
     <div style={{animation:"fadeUp .3s ease"}}>
 
-      {/* Storage tip */}
+      {/* Storage tip + direct Cloudinary link */}
       <div style={{background:`${C.amber}12`,border:`1px solid ${C.amber}33`,borderRadius:12,padding:"12px 14px",marginBottom:16}}>
-        <div style={{fontSize:12,fontWeight:700,color:C.amber,marginBottom:4}}>💡 Free up Cloudinary space</div>
-        <div style={{fontSize:11,color:C.textDim,lineHeight:1.7}}>
-          Deleting here removes files from the chat. To fully free Cloudinary storage, also delete them at <span style={{color:C.amber,fontWeight:700}}>cloudinary.com → Media Library</span>. You have 25GB free — use the filters below to find and clear old files.
+        <div style={{fontSize:12,fontWeight:700,color:C.amber,marginBottom:6}}>💡 Storage Manager</div>
+        <div style={{fontSize:11,color:C.textDim,lineHeight:1.7,marginBottom:10}}>
+          Deleting here removes files from chat. To fully free your Cloudinary storage (25GB free), you need to also delete them directly from your Cloudinary Media Library.
+        </div>
+        <button
+          onClick={()=>window.open("https://console.cloudinary.com/app/c-0f6daf0a410d99feaf80b4015e7f07/assets/images","_blank")}
+          style={{
+            width:"100%",padding:"10px",borderRadius:10,cursor:"pointer",
+            background:`linear-gradient(135deg,${C.amber},#a06010)`,
+            border:"none",color:"white",fontSize:12,fontWeight:800,
+            display:"flex",alignItems:"center",justifyContent:"center",gap:8,
+            boxShadow:`0 0 12px ${C.amber}44`,
+          }}>
+          <span>☁️</span> Open Cloudinary Media Library →
+        </button>
+        <div style={{fontSize:10,color:C.textMuted,marginTop:8,textAlign:"center"}}>
+          Opens in a new tab — select files → Delete to free storage
         </div>
       </div>
 
