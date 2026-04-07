@@ -64,6 +64,36 @@ const todayISO = () => new Date().toISOString().split("T")[0];
 const uid = () => Math.random().toString(36).slice(2,10);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PUSH NOTIFICATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+const VAPID_KEY = null; // Optional: add your VAPID key for full web push
+
+async function requestNotificationPermission() {
+  if(!("Notification" in window)) return false;
+  if(Notification.permission === "granted") return true;
+  if(Notification.permission === "denied") return false;
+  const result = await Notification.requestPermission();
+  return result === "granted";
+}
+
+function sendNotification(title, body, icon = "/favicon.ico") {
+  if(!("Notification" in window)) return;
+  if(Notification.permission !== "granted") return;
+  try {
+    const n = new Notification(title, {
+      body,
+      icon,
+      badge: "/favicon.ico",
+      vibrate: [200, 100, 200],
+      tag: title, // prevents duplicate notifications
+      renotify: false,
+    });
+    n.onclick = () => { window.focus(); n.close(); };
+    setTimeout(() => n.close(), 6000);
+  } catch(e) { console.warn("Notification error:", e); }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // COMPONENTS
 // ─────────────────────────────────────────────────────────────────────────────
 function DAWWLogo({size=32}) {
@@ -790,6 +820,104 @@ function OwnerDashboard({me, tasks, setTasks, workers, setWorkers, messages, set
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// TASKS VIEW — proper component (fixes white screen bug)
+// ─────────────────────────────────────────────────────────────────────────────
+function TasksView({tasks, toggleTask, addQuickTask, openTasks, isOwner}) {
+  const [newTask, setNewTask] = useState("");
+  const [pri, setPri]         = useState("med");
+  const [filter, setFilter]   = useState("all");
+
+  const doAdd = () => {
+    if(!newTask.trim()) return;
+    addQuickTask(newTask, pri);
+    setNewTask("");
+  };
+
+  const filtered = tasks.filter(t => {
+    if(filter==="open")   return !t.done;
+    if(filter==="done")   return t.done;
+    if(filter==="high")   return t.priority==="high" && !t.done;
+    return true;
+  });
+
+  return (
+    <div style={{padding:"0 16px 32px",animation:"fadeUp .3s ease"}}>
+      <div style={{padding:"16px 0 12px",fontSize:20,fontWeight:800}}>
+        <span style={{color:C.redBright}}>Tasks</span>
+        <span style={{fontFamily:"'DM Mono',monospace",fontSize:15,color:C.textMuted}}> · {openTasks} open</span>
+      </div>
+
+      {/* Add task bar */}
+      <div style={{background:C.surfaceHigh,border:`1px solid ${C.borderBright}`,borderRadius:12,padding:14,marginBottom:14}}>
+        <div style={{display:"flex",gap:8,marginBottom:10}}>
+          <input value={newTask} onChange={e=>setNewTask(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&doAdd()}
+            placeholder="Add a task…"
+            style={{flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 12px",fontSize:13,color:C.text,outline:"none",fontFamily:"'Sora',sans-serif"}}/>
+          <button onClick={doAdd} style={{background:`linear-gradient(135deg,${C.redBright},#7a1010)`,border:"none",borderRadius:8,padding:"9px 16px",cursor:"pointer",color:"white",fontSize:15,fontWeight:900}}>+</button>
+        </div>
+        {/* Priority selector */}
+        <div style={{display:"flex",gap:6}}>
+          {["high","med","low"].map(p=>{
+            const col = p==="high"?C.alert:p==="med"?C.amber:C.textDim;
+            return (
+              <button key={p} onClick={()=>setPri(p)} style={{padding:"5px 14px",borderRadius:6,fontSize:10,fontWeight:800,border:`1px solid ${pri===p?col:C.border}`,background:pri===p?`${col}18`:"transparent",color:pri===p?col:C.textMuted,cursor:"pointer",textTransform:"uppercase",letterSpacing:1,fontFamily:"'DM Mono',monospace"}}>{p}</button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Filter tabs */}
+      <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto"}}>
+        {[["all","All"],["open","Open"],["done","Done"],["high","🔴 High"]].map(([val,label])=>(
+          <button key={val} onClick={()=>setFilter(val)} style={{padding:"5px 14px",borderRadius:99,fontSize:11,fontWeight:700,border:`1px solid ${filter===val?C.redBright:C.border}`,background:filter===val?C.redDim:"transparent",color:filter===val?C.redBright:C.textMuted,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"'DM Mono',monospace"}}>{label}</button>
+        ))}
+      </div>
+
+      {/* Task list */}
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {filtered.length===0 && (
+          <div style={{textAlign:"center",color:C.textMuted,padding:"30px 0",fontSize:13}}>
+            No tasks here yet.
+          </div>
+        )}
+        {filtered.map(t=>(
+          <div key={t.id} onClick={()=>toggleTask(t)} style={{
+            background:t.done?C.surface:C.surfaceHigh,
+            border:`1px solid ${t.done?C.border:t.priority==="high"&&!t.done?C.alert+"33":C.borderBright}`,
+            borderRadius:12,padding:"12px 14px",
+            display:"flex",gap:12,alignItems:"flex-start",
+            cursor:"pointer",opacity:t.done?0.45:1,transition:"opacity .2s",
+          }}>
+            {/* Checkbox */}
+            <div style={{
+              width:22,height:22,borderRadius:6,flexShrink:0,marginTop:1,
+              border:`2px solid ${t.done?C.green:C.borderBright}`,
+              background:t.done?C.greenDim:"transparent",
+              display:"flex",alignItems:"center",justifyContent:"center",
+              fontSize:12,color:C.green,fontWeight:900,
+            }}>{t.done?"✓":""}</div>
+
+            {/* Content */}
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:600,color:C.text,textDecoration:t.done?"line-through":"none",lineHeight:1.4}}>{t.title}</div>
+              <div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap",alignItems:"center"}}>
+                <PriBadge p={t.priority}/>
+                {t.assignee&&<span style={{fontSize:11,color:C.taupe}}>→ {t.assignee}</span>}
+                {t.deadline&&<DeadlinePill deadline={t.deadline}/>}
+                {t.delivery&&<span style={{fontSize:9,color:C.blue,fontFamily:"'DM Mono',monospace",fontWeight:700}}>📦 {fmtDate(t.delivery)}</span>}
+                {t.done&&t.doneBy&&<span style={{fontSize:11,color:C.green}}>✓ {t.doneBy}</span>}
+                {t.note&&<span style={{fontSize:10,color:C.textMuted,fontStyle:"italic"}}>{t.note}</span>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MAIN APP
 // ─────────────────────────────────────────────────────────────────────────────
 export default function DAWWApp() {
@@ -841,14 +969,84 @@ export default function DAWWApp() {
     });
   },[]);
 
-  // Firebase subscriptions
+  // Notification permission
+  const [notifGranted, setNotifGranted] = useState(false);
+
+  useEffect(()=>{
+    if(!me) return;
+    requestNotificationPermission().then(granted => setNotifGranted(granted));
+  },[me]);
+
+  // Firebase subscriptions + smart notifications
+  const lastMsgTs  = useRef(0);
+  const lastTaskTs = useRef(0);
+
   useEffect(()=>{
     if(!db||!me) return;
     update(ref(db,`workers/${me.id}`),{online:true,lastSeen:serverTimestamp()});
+
+    // Workers
     const u1=onValue(ref(db,"workers"),snap=>{ const d=snap.val(); if(d){setWorkers(Object.values(d));setConnected(true);} });
-    const u2=onValue(ref(db,"messages"),snap=>{ const d=snap.val(); if(d){ const m=Object.entries(d).map(([id,v])=>({id,...v})); m.sort((a,b)=>(a.ts||0)-(b.ts||0)); setMessages(m); setConnected(true); } });
-    const u3=onValue(ref(db,"tasks"),snap=>{ const d=snap.val(); if(d){ setTasks(Object.entries(d).map(([id,v])=>({id,...v}))); setConnected(true); } });
-    return ()=>{u1();u2();u3();};
+
+    // Messages — notify on new messages from others
+    const u2=onValue(ref(db,"messages"),snap=>{
+      const d=snap.val();
+      if(d){
+        const msgs=Object.entries(d).map(([id,v])=>({id,...v}));
+        msgs.sort((a,b)=>(a.ts||0)-(b.ts||0));
+        setMessages(msgs);
+        setConnected(true);
+        // Find newest message
+        const newest = msgs[msgs.length-1];
+        if(newest && newest.ts > lastMsgTs.current && newest.name !== me.name) {
+          // Only notify if app is in background or on different tab
+          if(document.hidden) {
+            sendNotification(
+              newest.pinned ? "📌 Owner Announcement" : `💬 ${newest.name}`,
+              newest.pinned ? newest.text.replace("📌 ANNOUNCEMENT: ","") : newest.text
+            );
+          }
+          lastMsgTs.current = newest.ts;
+        } else if(newest) {
+          lastMsgTs.current = newest.ts;
+        }
+      }
+    });
+
+    // Tasks — notify when assigned to me
+    const u3=onValue(ref(db,"tasks"),snap=>{
+      const d=snap.val();
+      if(d){
+        const newTasks=Object.entries(d).map(([id,v])=>({id,...v}));
+        setTasks(newTasks);
+        setConnected(true);
+        // Check for newly assigned tasks
+        newTasks.forEach(t=>{
+          if(t.assignee===me.name && t.ts > lastTaskTs.current && t.createdBy !== me.name) {
+            sendNotification(
+              "✅ New Task Assigned to You",
+              `"${t.title}" — Priority: ${(t.priority||"med").toUpperCase()}`
+            );
+          }
+        });
+        const maxTs = Math.max(...newTasks.map(t=>t.ts||0), 0);
+        if(maxTs > 0) lastTaskTs.current = maxTs;
+      }
+    });
+
+    // Deadline reminder — check every 30 minutes
+    const deadlineCheck = setInterval(()=>{
+      tasks.forEach(t=>{
+        if(!t.done && t.deadline && t.assignee===me.name) {
+          const d = daysLeft(t.deadline);
+          if(d===1) sendNotification("⚠️ Deadline Tomorrow!", `"${t.title}" is due tomorrow`);
+          if(d===0) sendNotification("🚨 Due Today!", `"${t.title}" is due today`);
+          if(d<0)   sendNotification("❗ Overdue Task", `"${t.title}" is ${Math.abs(d)} day${Math.abs(d)!==1?"s":""} overdue`);
+        }
+      });
+    }, 1800000); // 30 minutes
+
+    return ()=>{u1();u2();u3();clearInterval(deadlineCheck);};
   },[me]);
 
   const logout = async () => {
@@ -926,6 +1124,31 @@ export default function DAWWApp() {
         </div>
       </div>
 
+      {/* Notification permission banner */}
+      {me && !notifGranted && (typeof Notification !== "undefined") && Notification?.permission !== "denied" && (
+        <div style={{background:`${C.amber}15`,border:`1px solid ${C.amber}33`,margin:"6px 16px 0",borderRadius:10,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.amber}}>🔔 Enable Notifications</div>
+            <div style={{fontSize:11,color:C.textMuted,marginTop:2}}>Get alerts for new messages, tasks & deadlines</div>
+          </div>
+          <button onClick={()=>requestNotificationPermission().then(g=>setNotifGranted(g))}
+            style={{background:`linear-gradient(135deg,${C.amber},#a06010)`,border:"none",borderRadius:8,padding:"7px 14px",cursor:"pointer",fontSize:12,color:"white",fontWeight:800,flexShrink:0}}>
+            Enable
+          </button>
+        </div>
+      )}
+      {me && (typeof Notification !== "undefined") && Notification?.permission === "denied" && (
+        <div style={{background:`${C.alert}10`,border:`1px solid ${C.alert}22`,margin:"6px 16px 0",borderRadius:10,padding:"8px 14px"}}>
+          <div style={{fontSize:11,color:C.textMuted}}>🔕 Notifications blocked — go to browser settings to allow them.</div>
+        </div>
+      )}
+      {me && notifGranted && (
+        <div style={{background:`${C.green}10`,border:`1px solid ${C.green}22`,margin:"6px 16px 0",borderRadius:10,padding:"8px 14px",display:"flex",alignItems:"center",gap:6}}>
+          <div style={{width:6,height:6,borderRadius:"50%",background:C.green,flexShrink:0}}/>
+          <div style={{fontSize:11,color:C.green,fontWeight:600}}>🔔 Notifications active — alerts on for messages, tasks & deadlines</div>
+        </div>
+      )}
+
       {/* CONTENT */}
       <div style={{flex:1,overflowY:view==="chat"?"hidden":"auto",display:"flex",flexDirection:"column"}}>
 
@@ -987,45 +1210,7 @@ export default function DAWWApp() {
         )}
 
         {/* TASKS */}
-        {view==="tasks"&&(()=>{
-          const [newTask,setNewTask]=useState("");
-          const [pri,setPri]=useState("med");
-          return (
-            <div style={{padding:"0 16px 32px",animation:"fadeUp .3s ease"}}>
-              <div style={{padding:"16px 0 14px",fontSize:20,fontWeight:800}}><span style={{color:C.redBright}}>Tasks</span> · <span style={{fontFamily:"'DM Mono',monospace",fontSize:15}}>{openTasks} open</span></div>
-              <div style={{background:C.surfaceHigh,border:`1px solid ${C.borderBright}`,borderRadius:12,padding:14,marginBottom:16}}>
-                <div style={{display:"flex",gap:8,marginBottom:8}}>
-                  <input value={newTask} onChange={e=>setNewTask(e.target.value)} onKeyDown={e=>e.key==="Enter"&&(addQuickTask(newTask,pri),setNewTask(""))}
-                    placeholder="Add a task…" style={{flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 12px",fontSize:13,color:C.text,outline:"none"}}/>
-                  <button onClick={()=>{addQuickTask(newTask,pri);setNewTask("");}} style={{background:`linear-gradient(135deg,${C.redBright},#7a1010)`,border:"none",borderRadius:8,padding:"9px 14px",cursor:"pointer",color:"white",fontSize:13,fontWeight:800}}>+</button>
-                </div>
-                <div style={{display:"flex",gap:6}}>
-                  {["high","med","low"].map(p=>(
-                    <button key={p} onClick={()=>setPri(p)} style={{padding:"4px 12px",borderRadius:6,fontSize:10,fontWeight:800,border:`1px solid ${pri===p?(p==="high"?C.alert:p==="med"?C.amber:C.textDim):C.border}`,background:pri===p?`${p==="high"?C.alert:p==="med"?C.amber:C.textDim}18`:"transparent",color:pri===p?(p==="high"?C.alert:p==="med"?C.amber:C.textDim):C.textMuted,cursor:"pointer",textTransform:"uppercase",letterSpacing:1,fontFamily:"'DM Mono',monospace"}}>{p}</button>
-                  ))}
-                </div>
-              </div>
-              <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                {tasks.map(t=>(
-                  <div key={t.id} onClick={()=>toggleTask(t)} style={{background:t.done?C.surface:C.surfaceHigh,border:`1px solid ${t.done?C.border:C.borderBright}`,borderRadius:12,padding:"12px 14px",display:"flex",gap:12,alignItems:"flex-start",cursor:"pointer",opacity:t.done?.45:1,transition:"opacity .2s"}}>
-                    <div style={{width:20,height:20,borderRadius:5,flexShrink:0,marginTop:1,border:`2px solid ${t.done?C.green:C.borderBright}`,background:t.done?C.greenDim:"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:C.green,fontWeight:900}}>{t.done?"✓":""}</div>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:13,fontWeight:600,textDecoration:t.done?"line-through":"none"}}>{t.title}</div>
-                      <div style={{display:"flex",gap:6,marginTop:5,flexWrap:"wrap",alignItems:"center"}}>
-                        <PriBadge p={t.priority}/>
-                        {t.assignee&&<span style={{fontSize:11,color:C.taupe}}>→ {t.assignee}</span>}
-                        {t.deadline&&<DeadlinePill deadline={t.deadline}/>}
-                        {t.delivery&&<span style={{fontSize:9,color:C.blue,fontFamily:"'DM Mono',monospace",fontWeight:700}}>📦 {fmtDate(t.delivery)}</span>}
-                        {t.done&&t.doneBy&&<span style={{fontSize:11,color:C.green}}>✓ {t.doneBy}</span>}
-                        {t.note&&<span style={{fontSize:10,color:C.textMuted,fontStyle:"italic"}}>{t.note}</span>}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })()}
+        {view==="tasks"&&<TasksView tasks={tasks} toggleTask={toggleTask} addQuickTask={addQuickTask} openTasks={openTasks} isOwner={isOwner}/>}
 
         {/* CHAT */}
         {view==="chat"&&<ChatView me={me} messages={messages} setMessages={setMessages} isOwner={isOwner}/>}
