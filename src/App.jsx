@@ -1,13 +1,19 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getDatabase, ref, push, onValue, set, update, remove, serverTimestamp }
-  from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+import {
+  getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  signOut, onAuthStateChanged, updateProfile
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import {
+  getDatabase, ref, push, onValue, set, update, remove, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 🔥 DAWW CREATIONS — Owner Suite Edition
+// DAWW CREATIONS — Full Platform v3
 // Owner: Marlon George
 // ─────────────────────────────────────────────────────────────────────────────
-const OWNER_NAME = "Marlon George";
+const OWNER_EMAIL = "owner@dawwcreations.com"; // Change to your real email
+const OWNER_NAME  = "Marlon George";
 
 const firebaseConfig = {
   apiKey:            "AIzaSyAOC9-BF1Mox6Oks8AP7p8MY7bNNXO6yn8",
@@ -19,58 +25,47 @@ const firebaseConfig = {
   appId:             "1:383758652383:web:52026fa0ffbf6e5d8aaa6a",
 };
 
-let db = null;
+let app, auth, db;
 try {
-  const app = initializeApp(firebaseConfig);
-  db = getDatabase(app);
-} catch (e) { console.warn("Firebase:", e); }
+  app  = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db   = getDatabase(app);
+} catch(e) { console.warn("Firebase:", e); }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BRAND
+// CONSTANTS & HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 const C = {
-  bg: "#0d0b0b", surface: "#131010", surfaceHigh: "#1c1717",
-  border: "#2a2222", borderBright: "#3a2e2e",
-  red: "#9b1c1c", redBright: "#c0392b", redGlow: "#c0392b44", redDim: "#9b1c1c22",
-  taupe: "#a09080", taupeLight: "#c4b4a4",
-  gold: "#d4a853", goldBright: "#f0c060", goldDim: "#d4a85322", goldGlow: "#d4a85344",
-  green: "#4caf7d", greenDim: "#4caf7d1a",
-  amber: "#e0a040", alert: "#e05050",
-  purple: "#9b7fd4",
-  text: "#ede8e4", textMuted: "#5c5050", textDim: "#8a7c78",
+  bg:"#0d0b0b", surface:"#131010", surfaceHigh:"#1c1717",
+  border:"#2a2222", borderBright:"#3a2e2e",
+  red:"#9b1c1c", redBright:"#c0392b", redGlow:"#c0392b44", redDim:"#9b1c1c22",
+  taupe:"#a09080", taupeLight:"#c4b4a4",
+  gold:"#d4a853", goldBright:"#f0c060", goldDim:"#d4a85322", goldGlow:"#d4a85344",
+  green:"#4caf7d", greenDim:"#4caf7d1a",
+  amber:"#e0a040", amberDim:"#e0a0401a",
+  alert:"#e05050", alertDim:"#e050501a",
+  purple:"#9b7fd4", purpleDim:"#9b7fd422",
+  blue:"#4a90d9",
+  text:"#ede8e4", textMuted:"#5c5050", textDim:"#8a7c78",
 };
 
-const WORKER_COLORS = ["#c0392b","#a09080","#d4a853","#7b8fa0","#8b6b9e","#4caf7d","#e07840","#6b9e8b"];
+const WORKER_COLORS = ["#c0392b","#a09080","#d4a853","#7b8fa0","#8b6b9e","#4caf7d","#e07840","#6b9e8b","#e07090","#50b4d0"];
 const ROLES = ["Owner","Site Lead","Foreman","Engineer","Operator","Safety Officer","Electrician","Crew Member","Supervisor","Driver","Designer","Coordinator"];
-const PRIORITIES = ["high","med","low"];
-const PROJECTS = ["Operations","Safety","Admin","General","Electrical","Logistics","Design","Finance"];
+const PROJECTS = ["Operations","Safety","Admin","General","Electrical","Logistics","Design","Finance","Maintenance"];
+const CHANNELS = ["general","safety","logistics","updates"];
+const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-const DEFAULT_TASKS = [
-  { title: "Morning team briefing", priority: "high", project: "Operations", due: today(), deadline: "", done: false, assignee: "", pinned: false },
-  { title: "Review daily work orders", priority: "high", project: "Operations", due: today(), deadline: "", done: false, assignee: "", pinned: false },
-  { title: "Safety equipment check", priority: "med", project: "Safety", due: today(), deadline: "", done: false, assignee: "", pinned: false },
-];
-
-function today() {
-  return new Date().toISOString().split("T")[0];
-}
-
-function fmtDate(d) {
-  if (!d) return "";
-  try { return new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }); }
-  catch { return d; }
-}
-
-function daysLeft(d) {
-  if (!d) return null;
-  const diff = Math.ceil((new Date(d + "T00:00:00") - new Date()) / 86400000);
-  return diff;
-}
+const toISO  = d => d ? new Date(d+"T00:00:00").toISOString().split("T")[0] : "";
+const fmtDate = d => { try { return new Date(d+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"}); } catch{return d||"";} };
+const daysLeft = d => { if(!d) return null; return Math.ceil((new Date(d+"T00:00:00")-new Date())/86400000); };
+const todayISO = () => new Date().toISOString().split("T")[0];
+const uid = () => Math.random().toString(36).slice(2,10);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LOGO
+// COMPONENTS
 // ─────────────────────────────────────────────────────────────────────────────
-function DAWWLogo({ size = 32 }) {
+function DAWWLogo({size=32}) {
   return (
     <svg width={size} height={size} viewBox="0 0 100 100" fill="none">
       <path d="M10 22 L30 62 L50 32 L70 62 L90 22" stroke="#a09080" strokeWidth="7.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
@@ -80,154 +75,440 @@ function DAWWLogo({ size = 32 }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// COMPONENTS
-// ─────────────────────────────────────────────────────────────────────────────
-function Avatar({ name, color, size = 34, isOwner = false }) {
-  const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+function Avatar({name="?", color=C.taupe, size=34, isOwner=false}) {
+  const i = (name||"?").split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
   return (
-    <div style={{ position: "relative", flexShrink: 0 }}>
-      <div style={{
-        width: size, height: size, borderRadius: "50%",
-        background: isOwner ? `${C.gold}22` : `${color}22`,
-        border: `2px solid ${isOwner ? C.goldBright : color}88`,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: size * 0.33, fontWeight: 700,
-        color: isOwner ? C.goldBright : color,
-        fontFamily: "'DM Mono', monospace",
-        boxShadow: isOwner ? `0 0 10px ${C.goldGlow}` : "none",
-      }}>{initials}</div>
-      {isOwner && (
-        <div style={{ position: "absolute", top: -4, right: -4, fontSize: 10, lineHeight: 1 }}>👑</div>
-      )}
+    <div style={{position:"relative",flexShrink:0}}>
+      <div style={{width:size,height:size,borderRadius:"50%",background:`${isOwner?C.gold:color}22`,border:`2px solid ${isOwner?C.goldBright:color}88`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.33,fontWeight:700,color:isOwner?C.goldBright:color,fontFamily:"'DM Mono',monospace",boxShadow:isOwner?`0 0 10px ${C.goldGlow}`:"none"}}>{i}</div>
+      {isOwner && <div style={{position:"absolute",top:-4,right:-4,fontSize:9}}>👑</div>}
     </div>
   );
 }
 
-function PriBadge({ p }) {
-  const map = { high: [C.alert, "HIGH"], med: [C.amber, "MED"], low: [C.textDim, "LOW"] };
-  const [col, label] = map[p] || [C.textDim, "MED"];
-  return (
-    <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.2, color: col, background: `${col}18`, border: `1px solid ${col}33`, borderRadius: 4, padding: "2px 6px", fontFamily: "'DM Mono', monospace" }}>{label}</span>
-  );
+function PriBadge({p}) {
+  const map={high:[C.alert,"HIGH"],med:[C.amber,"MED"],low:[C.textDim,"LOW"]};
+  const [col,label]=map[p]||[C.textDim,"MED"];
+  return <span style={{fontSize:9,fontWeight:800,letterSpacing:1.2,color:col,background:`${col}18`,border:`1px solid ${col}33`,borderRadius:4,padding:"2px 6px",fontFamily:"'DM Mono',monospace"}}>{label}</span>;
 }
 
-function ProgressBar({ value, color = C.redBright }) {
+function DeadlinePill({deadline}) {
+  if(!deadline) return null;
+  const d=daysLeft(deadline);
+  const col=d<0?C.alert:d<=2?C.amber:C.green;
+  const lbl=d<0?`${Math.abs(d)}d overdue`:d===0?"Due today":`${d}d left`;
+  return <span style={{fontSize:9,fontWeight:800,color:col,background:`${col}18`,border:`1px solid ${col}33`,borderRadius:4,padding:"2px 7px",fontFamily:"'DM Mono',monospace"}}>{lbl}</span>;
+}
+
+function ProgressBar({value,color=C.redBright}) {
   return (
-    <div style={{ background: C.border, borderRadius: 99, height: 5, flex: 1, overflow: "hidden" }}>
-      <div style={{ width: `${Math.min(100, value)}%`, height: "100%", background: `linear-gradient(90deg, ${color}, ${color}99)`, borderRadius: 99, transition: "width 0.6s ease", boxShadow: `0 0 8px ${color}88` }} />
+    <div style={{background:C.border,borderRadius:99,height:5,flex:1,overflow:"hidden"}}>
+      <div style={{width:`${Math.min(100,value)}%`,height:"100%",background:`linear-gradient(90deg,${color},${color}99)`,borderRadius:99,transition:"width .6s ease",boxShadow:`0 0 8px ${color}88`}}/>
     </div>
   );
 }
 
-function DeadlinePill({ deadline }) {
-  if (!deadline) return null;
-  const days = daysLeft(deadline);
-  const color = days < 0 ? C.alert : days <= 2 ? C.amber : C.green;
-  const label = days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? "Due today" : `${days}d left`;
+function Input({label,type="text",value,onChange,placeholder,error}) {
   return (
-    <span style={{ fontSize: 9, fontWeight: 800, color, background: `${color}18`, border: `1px solid ${color}33`, borderRadius: 4, padding: "2px 7px", fontFamily: "'DM Mono', monospace" }}>{label}</span>
+    <div style={{marginBottom:14}}>
+      {label && <label style={{fontSize:10,color:C.textMuted,fontWeight:700,letterSpacing:1.5,display:"block",marginBottom:6,fontFamily:"'DM Mono',monospace"}}>{label}</label>}
+      <input type={type} value={value} onChange={onChange} placeholder={placeholder}
+        style={{width:"100%",background:C.surfaceHigh,border:`1px solid ${error?C.alert:C.borderBright}`,borderRadius:10,padding:"11px 14px",fontSize:14,color:C.text,outline:"none",fontFamily:"'Sora',sans-serif"}}/>
+      {error && <div style={{fontSize:11,color:C.alert,marginTop:4}}>{error}</div>}
+    </div>
+  );
+}
+
+function Btn({children,onClick,color=C.redBright,disabled=false,small=false,outline=false}) {
+  const bg = outline ? "transparent" : disabled ? C.border : `linear-gradient(135deg,${color},${color}99)`;
+  return (
+    <button onClick={onClick} disabled={disabled} style={{
+      width:small?"auto":"100%", padding:small?"7px 16px":"13px",
+      borderRadius:10, border:`1px solid ${outline?color+"66":color+"00"}`,
+      background:bg, color:disabled?C.textMuted:outline?color:"white",
+      fontSize:small?12:13, fontWeight:800, cursor:disabled?"default":"pointer",
+      letterSpacing:small?0:1.5, textTransform:small?"none":"uppercase",
+      boxShadow:(!disabled&&!outline)?`0 0 20px ${color}44`:"none",
+      transition:"all .2s", fontFamily:"'Sora',sans-serif",
+    }}>{children}</button>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SETUP SCREEN
+// AUTH SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
-function SetupScreen({ onJoin }) {
-  const [name, setName] = useState("");
-  const [role, setRole] = useState(ROLES[7]);
-  const [color, setColor] = useState(WORKER_COLORS[0]);
+function AuthScreen({onAuth}) {
+  const [mode,setMode]       = useState("login"); // login | signup
+  const [name,setName]       = useState("");
+  const [email,setEmail]     = useState("");
+  const [password,setPass]   = useState("");
+  const [role,setRole]       = useState("Crew Member");
+  const [color,setColor]     = useState(WORKER_COLORS[0]);
+  const [err,setErr]         = useState("");
+  const [loading,setLoading] = useState(false);
 
-  const join = () => {
-    if (!name.trim()) return;
-    const isOwner = name.trim() === OWNER_NAME;
-    onJoin({ name: name.trim(), role: isOwner ? "Owner" : role, color: isOwner ? C.goldBright : color, id: Date.now().toString(), isOwner });
+  const isOwnerSignup = email.trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
+
+  const submit = async () => {
+    setErr(""); setLoading(true);
+    try {
+      if(mode==="signup") {
+        if(!name.trim()) { setErr("Please enter your name."); setLoading(false); return; }
+        const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+        await updateProfile(cred.user, {displayName: name.trim()});
+        const profile = {
+          id: cred.user.uid, name: name.trim(),
+          role: isOwnerSignup ? "Owner" : role,
+          color: isOwnerSignup ? C.goldBright : color,
+          email: email.trim(), isOwner: isOwnerSignup,
+          online: true, joinedAt: Date.now(),
+        };
+        await set(ref(db,`workers/${cred.user.uid}`), profile);
+        onAuth(profile);
+      } else {
+        const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+        // profile loaded in main app via onAuthStateChanged
+      }
+    } catch(e) {
+      const msgs = {
+        "auth/email-already-in-use":"This email is already registered. Try logging in.",
+        "auth/invalid-email":"Please enter a valid email address.",
+        "auth/weak-password":"Password must be at least 6 characters.",
+        "auth/user-not-found":"No account found with this email.",
+        "auth/wrong-password":"Incorrect password. Please try again.",
+        "auth/invalid-credential":"Incorrect email or password.",
+      };
+      setErr(msgs[e.code] || e.message);
+    }
+    setLoading(false);
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, fontFamily: "'Sora', sans-serif", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+    <div style={{minHeight:"100vh",background:C.bg,fontFamily:"'Sora',sans-serif",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=DM+Mono:wght@400;700&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        input, select { font-family: 'Sora', sans-serif; }
-        input::placeholder { color: #3a2e2e; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-        @keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes goldglow { 0%,100%{filter:drop-shadow(0 0 12px #d4a85344)} 50%{filter:drop-shadow(0 0 28px #d4a85388)} }
-        @keyframes redglow { 0%,100%{filter:drop-shadow(0 0 12px #c0392b44)} 50%{filter:drop-shadow(0 0 28px #c0392b77)} }
+        *{box-sizing:border-box;margin:0;padding:0;}
+        input,select{font-family:'Sora',sans-serif;}
+        input::placeholder{color:#3a2e2e;}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes redglow{0%,100%{filter:drop-shadow(0 0 12px #c0392b44)}50%{filter:drop-shadow(0 0 28px #c0392b77)}}
       `}</style>
 
-      <div style={{ textAlign: "center", marginBottom: 32, animation: "fadeUp 0.5s ease" }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 14, animation: "redglow 3s infinite" }}>
-          <DAWWLogo size={76} />
+      {/* Brand */}
+      <div style={{textAlign:"center",marginBottom:28,animation:"fadeUp .5s ease"}}>
+        <div style={{display:"flex",justifyContent:"center",marginBottom:12,animation:"redglow 3s infinite"}}>
+          <DAWWLogo size={68}/>
         </div>
-        <div style={{ fontSize: 22, fontWeight: 800, color: C.text, letterSpacing: 3, textTransform: "uppercase" }}>
-          DAWW <span style={{ color: C.redBright }}>CREATIONS</span>
+        <div style={{fontSize:22,fontWeight:800,color:C.text,letterSpacing:3,textTransform:"uppercase"}}>
+          DAWW <span style={{color:C.redBright}}>CREATIONS</span>
         </div>
-        <div style={{ fontSize: 10, color: C.textMuted, marginTop: 5, letterSpacing: 3, fontFamily: "'DM Mono', monospace" }}>TEAM SYNC PLATFORM</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, justifyContent: "center" }}>
-          <div style={{ height: 1, width: 40, background: `linear-gradient(90deg, transparent, ${C.taupe}66)` }} />
-          <div style={{ width: 5, height: 5, background: C.redBright, transform: "rotate(45deg)" }} />
-          <div style={{ height: 1, width: 40, background: `linear-gradient(90deg, ${C.taupe}66, transparent)` }} />
-        </div>
+        <div style={{fontSize:10,color:C.textMuted,marginTop:5,letterSpacing:3,fontFamily:"'DM Mono',monospace"}}>TEAM SYNC PLATFORM</div>
       </div>
 
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 20, padding: 26, width: "100%", maxWidth: 380, boxShadow: `0 0 50px ${C.redGlow}` }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: C.taupeLight, marginBottom: 20 }}>Who are you? Enter your details to join.</div>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:20,padding:26,width:"100%",maxWidth:380,boxShadow:`0 0 50px ${C.redGlow}`,animation:"fadeUp .6s ease"}}>
 
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: 10, color: C.textMuted, fontWeight: 700, letterSpacing: 1.5, display: "block", marginBottom: 6, fontFamily: "'DM Mono', monospace" }}>YOUR NAME</label>
-          <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && join()}
-            placeholder="e.g. Marcus Williams"
-            style={{ width: "100%", background: C.surfaceHigh, border: `1px solid ${name === OWNER_NAME ? C.goldBright : C.borderBright}`, borderRadius: 10, padding: "11px 14px", fontSize: 14, color: C.text, outline: "none", transition: "border 0.2s" }}
-          />
-          {name === OWNER_NAME && (
-            <div style={{ fontSize: 11, color: C.goldBright, marginTop: 6, fontWeight: 700 }}>👑 Owner access detected — welcome back, Marlon!</div>
-          )}
+        {/* Tabs */}
+        <div style={{display:"flex",gap:0,marginBottom:22,background:C.surfaceHigh,borderRadius:10,padding:3}}>
+          {["login","signup"].map(m=>(
+            <button key={m} onClick={()=>{setMode(m);setErr("");}} style={{flex:1,padding:"8px",borderRadius:8,border:"none",background:mode===m?C.redBright:"transparent",color:mode===m?"white":C.textMuted,fontSize:12,fontWeight:700,cursor:"pointer",textTransform:"uppercase",letterSpacing:1,fontFamily:"'DM Mono',monospace",transition:"all .2s"}}>
+              {m==="login"?"Log In":"Sign Up"}
+            </button>
+          ))}
         </div>
 
-        {name !== OWNER_NAME && (
-          <div style={{ marginBottom: 14 }}>
-            <label style={{ fontSize: 10, color: C.textMuted, fontWeight: 700, letterSpacing: 1.5, display: "block", marginBottom: 6, fontFamily: "'DM Mono', monospace" }}>YOUR ROLE</label>
-            <select value={role} onChange={e => setRole(e.target.value)}
-              style={{ width: "100%", background: C.surfaceHigh, border: `1px solid ${C.borderBright}`, borderRadius: 10, padding: "11px 14px", fontSize: 14, color: C.text, outline: "none", appearance: "none" }}>
-              {ROLES.filter(r => r !== "Owner").map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </div>
+        {mode==="signup" && (
+          <Input label="YOUR FULL NAME" value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Marcus Williams"/>
         )}
 
-        {name !== OWNER_NAME && (
-          <div style={{ marginBottom: 22 }}>
-            <label style={{ fontSize: 10, color: C.textMuted, fontWeight: 700, letterSpacing: 1.5, display: "block", marginBottom: 10, fontFamily: "'DM Mono', monospace" }}>YOUR COLOR</label>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {WORKER_COLORS.map(col => (
-                <div key={col} onClick={() => setColor(col)} style={{ width: 28, height: 28, borderRadius: "50%", background: col, cursor: "pointer", border: color === col ? `3px solid ${C.taupeLight}` : `3px solid transparent`, boxShadow: color === col ? `0 0 10px ${col}` : "none", transition: "all 0.15s" }} />
-              ))}
+        <Input label="EMAIL ADDRESS" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@email.com"/>
+        <Input label="PASSWORD" type="password" value={password} onChange={e=>setPass(e.target.value)} placeholder="Min. 6 characters" error={err}/>
+
+        {mode==="signup" && !isOwnerSignup && (
+          <>
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:10,color:C.textMuted,fontWeight:700,letterSpacing:1.5,display:"block",marginBottom:6,fontFamily:"'DM Mono',monospace"}}>YOUR ROLE</label>
+              <select value={role} onChange={e=>setRole(e.target.value)} style={{width:"100%",background:C.surfaceHigh,border:`1px solid ${C.borderBright}`,borderRadius:10,padding:"11px 14px",fontSize:14,color:C.text,outline:"none",appearance:"none"}}>
+                {ROLES.filter(r=>r!=="Owner").map(r=><option key={r} value={r}>{r}</option>)}
+              </select>
             </div>
-          </div>
-        )}
-
-        {name.trim() && (
-          <div style={{ display: "flex", alignItems: "center", gap: 12, background: C.surfaceHigh, borderRadius: 10, padding: "10px 14px", marginBottom: 18, border: `1px solid ${name === OWNER_NAME ? C.goldBright + "44" : C.borderBright}` }}>
-            <Avatar name={name} color={name === OWNER_NAME ? C.goldBright : color} size={38} isOwner={name === OWNER_NAME} />
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{name}</div>
-              <div style={{ fontSize: 11, color: C.textMuted }}>{name === OWNER_NAME ? "Owner" : role} · DAWW CREATIONS</div>
+            <div style={{marginBottom:20}}>
+              <label style={{fontSize:10,color:C.textMuted,fontWeight:700,letterSpacing:1.5,display:"block",marginBottom:8,fontFamily:"'DM Mono',monospace"}}>YOUR COLOR</label>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {WORKER_COLORS.map(col=>(
+                  <div key={col} onClick={()=>setColor(col)} style={{width:26,height:26,borderRadius:"50%",background:col,cursor:"pointer",border:color===col?`3px solid white`:`3px solid transparent`,boxShadow:color===col?`0 0 10px ${col}`:"none",transition:"all .15s"}}/>
+                ))}
+              </div>
             </div>
+          </>
+        )}
+
+        {mode==="signup" && isOwnerSignup && (
+          <div style={{background:`${C.goldBright}12`,border:`1px solid ${C.goldBright}44`,borderRadius:8,padding:"10px 12px",marginBottom:16,fontSize:11,color:C.goldBright,fontWeight:700}}>
+            👑 Owner account detected — you'll have full admin access.
           </div>
         )}
 
-        <button onClick={join} disabled={!name.trim()} style={{
-          width: "100%", padding: 14, borderRadius: 12, border: "none",
-          background: !name.trim() ? C.border : name === OWNER_NAME ? `linear-gradient(135deg, ${C.goldBright}, #a07020)` : `linear-gradient(135deg, ${C.redBright}, #7a1010)`,
-          color: name.trim() ? (name === OWNER_NAME ? C.bg : "#fff") : C.textMuted,
-          fontSize: 13, fontWeight: 800, cursor: name.trim() ? "pointer" : "default",
-          letterSpacing: 2, textTransform: "uppercase",
-          boxShadow: name.trim() ? `0 0 28px ${name === OWNER_NAME ? C.goldGlow : C.redGlow}` : "none",
-          transition: "all 0.2s",
-        }}>
-          {name === OWNER_NAME ? "👑 Enter Owner Dashboard →" : "Join The Team →"}
-        </button>
+        <Btn onClick={submit} disabled={loading} color={isOwnerSignup?C.goldBright:C.redBright}>
+          {loading?"Please wait…":mode==="login"?"Log In →":"Create Account →"}
+        </Btn>
+
+        <div style={{textAlign:"center",marginTop:14,fontSize:12,color:C.textMuted}}>
+          {mode==="login"?"Don't have an account? ":"Already have an account? "}
+          <span onClick={()=>{setMode(mode==="login"?"signup":"login");setErr("");}} style={{color:C.redBright,fontWeight:700,cursor:"pointer"}}>
+            {mode==="login"?"Sign Up":"Log In"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CALENDAR VIEW
+// ─────────────────────────────────────────────────────────────────────────────
+function CalendarView({tasks, isOwner}) {
+  const now = new Date();
+  const [year,setYear]   = useState(now.getFullYear());
+  const [month,setMonth] = useState(now.getMonth());
+  const [selected,setSel] = useState(null);
+
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const todayStr = todayISO();
+
+  const prevMonth = () => { if(month===0){setMonth(11);setYear(y=>y-1);}else setMonth(m=>m-1); setSel(null); };
+  const nextMonth = () => { if(month===11){setMonth(0);setYear(y=>y+1);}else setMonth(m=>m+1); setSel(null); };
+
+  const getDateStr = (day) => {
+    const m = String(month+1).padStart(2,"0");
+    const d = String(day).padStart(2,"0");
+    return `${year}-${m}-${d}`;
+  };
+
+  const getTasksForDate = (dateStr) => tasks.filter(t =>
+    t.deadline === dateStr || t.delivery === dateStr
+  );
+
+  const selectedTasks = selected ? getTasksForDate(selected) : [];
+
+  const cells = [];
+  for(let i=0;i<firstDay;i++) cells.push(null);
+  for(let d=1;d<=daysInMonth;d++) cells.push(d);
+
+  return (
+    <div style={{padding:"0 16px 32px",animation:"fadeUp .3s ease"}}>
+      <div style={{padding:"16px 0 14px",fontSize:20,fontWeight:800}}>
+        <span style={{color:C.purple}}>Calendar</span>
+      </div>
+
+      {/* Month nav */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 16px"}}>
+        <button onClick={prevMonth} style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize:18,padding:"0 8px"}}>‹</button>
+        <div style={{fontSize:14,fontWeight:800,color:C.text}}>{MONTHS[month]} {year}</div>
+        <button onClick={nextMonth} style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize:18,padding:"0 8px"}}>›</button>
+      </div>
+
+      {/* Legend */}
+      <div style={{display:"flex",gap:14,marginBottom:12,fontSize:10,fontFamily:"'DM Mono',monospace",fontWeight:700}}>
+        <div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:8,height:8,borderRadius:"50%",background:C.alert}}/><span style={{color:C.textDim}}>DEADLINE</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:8,height:8,borderRadius:"50%",background:C.blue}}/><span style={{color:C.textDim}}>DELIVERY</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:8,height:8,borderRadius:"50%",background:C.amber}}/><span style={{color:C.textDim}}>BOTH</span></div>
+      </div>
+
+      {/* Day headers */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:4}}>
+        {DAYS.map(d=>(
+          <div key={d} style={{textAlign:"center",fontSize:10,fontWeight:700,color:C.textMuted,fontFamily:"'DM Mono',monospace",padding:"4px 0"}}>{d}</div>
+        ))}
+      </div>
+
+      {/* Calendar grid */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:16}}>
+        {cells.map((day,i)=>{
+          if(!day) return <div key={i}/>;
+          const dateStr = getDateStr(day);
+          const dayTasks = getTasksForDate(dateStr);
+          const hasDeadline = dayTasks.some(t=>t.deadline===dateStr);
+          const hasDelivery = dayTasks.some(t=>t.delivery===dateStr);
+          const isToday = dateStr===todayStr;
+          const isSel = dateStr===selected;
+          const dotColor = hasDeadline&&hasDelivery?C.amber:hasDeadline?C.alert:hasDelivery?C.blue:null;
+
+          return (
+            <div key={day} onClick={()=>setSel(isSel?null:dateStr)} style={{
+              aspectRatio:"1",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+              borderRadius:8,cursor:dayTasks.length?"pointer":"default",
+              background:isSel?C.redDim:isToday?`${C.redBright}22`:"transparent",
+              border:`1px solid ${isSel?C.redBright:isToday?C.redBright+"66":C.border}`,
+              transition:"all .15s",position:"relative",
+            }}>
+              <span style={{fontSize:12,fontWeight:isToday?800:500,color:isToday?C.redBright:C.text}}>{day}</span>
+              {dotColor && <div style={{width:5,height:5,borderRadius:"50%",background:dotColor,marginTop:2,boxShadow:`0 0 4px ${dotColor}`}}/>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Selected day tasks */}
+      {selected && (
+        <div style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:14,padding:16}}>
+          <div style={{fontSize:11,color:C.purple,fontWeight:700,letterSpacing:1.5,marginBottom:12,fontFamily:"'DM Mono',monospace"}}>
+            {fmtDate(selected).toUpperCase()} — {selectedTasks.length} ITEM{selectedTasks.length!==1?"S":""}
+          </div>
+          {selectedTasks.length===0 && <div style={{fontSize:12,color:C.textMuted}}>No tasks, deadlines or deliveries on this date.</div>}
+          {selectedTasks.map(t=>(
+            <div key={t.id} style={{background:C.bg,border:`1px solid ${C.borderBright}`,borderRadius:10,padding:"10px 14px",marginBottom:8}}>
+              <div style={{fontSize:13,fontWeight:600,color:C.text,marginBottom:6}}>{t.title}</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                <PriBadge p={t.priority}/>
+                {t.deadline===selected && <span style={{fontSize:9,fontWeight:800,color:C.alert,background:C.alertDim,border:`1px solid ${C.alert}33`,borderRadius:4,padding:"2px 7px",fontFamily:"'DM Mono',monospace"}}>📌 DEADLINE</span>}
+                {t.delivery===selected && <span style={{fontSize:9,fontWeight:800,color:C.blue,background:`${C.blue}18`,border:`1px solid ${C.blue}33`,borderRadius:4,padding:"2px 7px",fontFamily:"'DM Mono',monospace"}}>📦 DELIVERY</span>}
+                {t.assignee && <span style={{fontSize:10,color:C.taupe}}>→ {t.assignee}</span>}
+                {t.done && <span style={{fontSize:10,color:C.green}}>✓ Done</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* All upcoming */}
+      <div style={{marginTop:16}}>
+        <div style={{fontSize:11,color:C.textMuted,fontWeight:700,letterSpacing:1.5,marginBottom:10,fontFamily:"'DM Mono',monospace",textTransform:"uppercase"}}>Upcoming Deadlines & Deliveries</div>
+        {tasks
+          .filter(t=>(t.deadline||t.delivery)&&!t.done)
+          .sort((a,b)=>new Date(a.deadline||a.delivery)-new Date(b.deadline||b.delivery))
+          .slice(0,10)
+          .map(t=>(
+            <div key={t.id} style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.title}</div>
+                <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap",alignItems:"center"}}>
+                  {t.deadline && <DeadlinePill deadline={t.deadline}/>}
+                  {t.delivery && <span style={{fontSize:9,fontWeight:700,color:C.blue,background:`${C.blue}18`,border:`1px solid ${C.blue}33`,borderRadius:4,padding:"2px 6px",fontFamily:"'DM Mono',monospace"}}>📦 {fmtDate(t.delivery)}</span>}
+                  {t.assignee && <span style={{fontSize:10,color:C.textMuted}}>→ {t.assignee}</span>}
+                </div>
+              </div>
+              <button onClick={()=>{
+                const d = t.deadline||t.delivery;
+                const title = encodeURIComponent(`DAWW: ${t.title}`);
+                const date = d.replace(/-/g,"");
+                window.open(`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${date}/${date}`, "_blank");
+              }} style={{background:`${C.blue}18`,border:`1px solid ${C.blue}33`,borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:12,color:C.blue,fontWeight:700,flexShrink:0}} title="Add to Google Calendar">📆</button>
+            </div>
+          ))}
+        {tasks.filter(t=>(t.deadline||t.delivery)&&!t.done).length===0 && (
+          <div style={{fontSize:12,color:C.textMuted,textAlign:"center",padding:"20px 0"}}>No upcoming deadlines or deliveries yet.{isOwner?" Add them from the Owner dashboard.":""}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHAT VIEW (with edit & delete for own messages)
+// ─────────────────────────────────────────────────────────────────────────────
+function ChatView({me, messages, setMessages, isOwner}) {
+  const [channel,setChannel] = useState("general");
+  const [input,setInput]     = useState("");
+  const [editing,setEditing] = useState(null); // {id, text}
+  const bottomRef = useRef(null);
+
+  useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:"smooth"}); },[messages,channel]);
+
+  const send = () => {
+    if(!input.trim()) return;
+    const time = new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+    const msg = {uid:me.id, name:me.name, color:me.color, isOwner:me.isOwner||false, text:input.trim(), time, channel, ts:Date.now(), edited:false};
+    if(db) push(ref(db,"messages"),msg);
+    else setMessages(m=>[...m,{...msg,id:uid()}]);
+    setInput("");
+  };
+
+  const saveEdit = (id) => {
+    if(!editing?.text.trim()) return;
+    if(db) update(ref(db,`messages/${id}`),{text:editing.text.trim(),edited:true});
+    else setMessages(ms=>ms.map(m=>m.id===id?{...m,text:editing.text.trim(),edited:true}:m));
+    setEditing(null);
+  };
+
+  const deleteMsg = (id) => {
+    if(db) remove(ref(db,`messages/${id}`));
+    else setMessages(ms=>ms.filter(m=>m.id!==id));
+  };
+
+  const visible = messages.filter(m=>m.channel===channel);
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",flex:1,minHeight:"calc(100vh - 145px)",animation:"fadeUp .3s ease"}}>
+      {/* Channels */}
+      <div style={{display:"flex",gap:6,padding:"8px 16px",borderBottom:`1px solid ${C.border}`,overflowX:"auto"}}>
+        {CHANNELS.map(ch=>(
+          <button key={ch} onClick={()=>setChannel(ch)} style={{padding:"5px 12px",borderRadius:8,fontSize:10,fontWeight:700,border:`1px solid ${channel===ch?C.redBright:C.border}`,background:channel===ch?C.redDim:"transparent",color:channel===ch?C.redBright:C.textMuted,cursor:"pointer",whiteSpace:"nowrap",textTransform:"uppercase",letterSpacing:.8,fontFamily:"'DM Mono',monospace"}}>#{ch}</button>
+        ))}
+      </div>
+
+      {/* Messages */}
+      <div style={{flex:1,overflowY:"auto",padding:"14px 16px",display:"flex",flexDirection:"column",gap:12}}>
+        {visible.length===0 && <div style={{textAlign:"center",color:C.textMuted,marginTop:60,fontSize:13}}>No messages in #{channel} yet.<br/>Be the first to say something 👇</div>}
+
+        {visible.map((msg,i)=>{
+          const isMine = msg.uid===me.id || msg.name===me.name;
+          const prevSame = i>0 && visible[i-1].name===msg.name;
+          const msgOwner = msg.isOwner||msg.name===OWNER_NAME;
+          const isEditing = editing?.id===msg.id;
+
+          return (
+            <div key={msg.id} style={{display:"flex",gap:10,flexDirection:isMine?"row-reverse":"row",animation:"fadeUp .2s ease"}}>
+              {!isMine&&!prevSame && <Avatar name={msg.name} color={msg.color||C.taupe} size={28} isOwner={msgOwner}/>}
+              {!isMine&&prevSame && <div style={{width:28}}/>}
+              <div style={{maxWidth:"78%"}}>
+                {!prevSame&&!isMine && (
+                  <div style={{fontSize:11,color:msgOwner?C.goldBright:msg.color||C.taupe,fontWeight:700,marginBottom:3}}>
+                    {msg.name}{msgOwner?" 👑":""} · <span style={{color:C.textMuted,fontWeight:400}}>{msg.time}</span>
+                    {msg.edited&&<span style={{color:C.textMuted,fontSize:9,marginLeft:4}}>(edited)</span>}
+                  </div>
+                )}
+
+                {isEditing ? (
+                  <div style={{display:"flex",gap:6,flexDirection:"column"}}>
+                    <textarea value={editing.text} onChange={e=>setEditing(ed=>({...ed,text:e.target.value}))}
+                      style={{background:C.surfaceHigh,border:`1px solid ${C.redBright}44`,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.text,outline:"none",resize:"none",minHeight:60,fontFamily:"'Sora',sans-serif",width:220}}/>
+                    <div style={{display:"flex",gap:6}}>
+                      <button onClick={()=>saveEdit(msg.id)} style={{background:`linear-gradient(135deg,${C.green},${C.green}99)`,border:"none",borderRadius:7,padding:"5px 14px",cursor:"pointer",fontSize:12,color:"white",fontWeight:700}}>Save</button>
+                      <button onClick={()=>setEditing(null)} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 14px",cursor:"pointer",fontSize:12,color:C.textMuted,fontWeight:700}}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{position:"relative"}}>
+                    <div style={{background:isMine?C.redDim:msgOwner?`${C.goldBright}12`:C.surfaceHigh,border:`1px solid ${isMine?C.redBright+"44":msgOwner?C.goldBright+"44":C.border}`,borderRadius:isMine?"14px 4px 14px 14px":"4px 14px 14px 14px",padding:"9px 13px",fontSize:13,color:C.text,lineHeight:1.55}}>
+                      {msg.text}
+                    </div>
+                    {isMine && (
+                      <div style={{display:"flex",gap:6,marginTop:4,justifyContent:"flex-end"}}>
+                        <span style={{fontSize:10,color:C.textMuted}}>{msg.time}{msg.edited?" · edited":""}</span>
+                        <button onClick={()=>setEditing({id:msg.id,text:msg.text})} style={{background:"none",border:"none",cursor:"pointer",fontSize:10,color:C.textDim,padding:"0 2px"}}>✏️</button>
+                        <button onClick={()=>deleteMsg(msg.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:10,color:C.alert,padding:"0 2px"}}>🗑</button>
+                      </div>
+                    )}
+                    {/* Owner can delete any message */}
+                    {!isMine && isOwner && (
+                      <button onClick={()=>deleteMsg(msg.id)} style={{position:"absolute",top:-6,right:-6,background:C.alertDim,border:`1px solid ${C.alert}44`,borderRadius:"50%",width:18,height:18,cursor:"pointer",fontSize:9,color:C.alert,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef}/>
+      </div>
+
+      {/* Input */}
+      <div style={{padding:"10px 16px 16px",borderTop:`1px solid ${C.border}`,display:"flex",gap:8}}>
+        <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()}
+          placeholder={`Message #${channel}…`}
+          style={{flex:1,background:C.surfaceHigh,border:`1px solid ${isOwner?C.goldBright+"44":C.borderBright}`,borderRadius:10,padding:"10px 14px",fontSize:13,color:C.text,outline:"none"}}/>
+        <button onClick={send} style={{background:isOwner?`linear-gradient(135deg,${C.goldBright},#a07020)`:`linear-gradient(135deg,${C.redBright},#7a1010)`,border:"none",borderRadius:10,padding:"10px 18px",cursor:"pointer",fontSize:15,color:isOwner?C.bg:"white",fontWeight:900}}>↑</button>
       </div>
     </div>
   );
@@ -236,244 +517,162 @@ function SetupScreen({ onJoin }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // OWNER DASHBOARD
 // ─────────────────────────────────────────────────────────────────────────────
-function OwnerDashboard({ me, tasks, setTasks, workers, setWorkers, messages, setMessages, setView }) {
-  const [showAddTask, setShowAddTask] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newPri, setNewPri] = useState("high");
-  const [newProject, setNewProject] = useState("Operations");
-  const [newAssignee, setNewAssignee] = useState("");
-  const [newDeadline, setNewDeadline] = useState("");
-  const [newDelivery, setNewDelivery] = useState("");
-  const [announcement, setAnnouncement] = useState("");
+function OwnerDashboard({me, tasks, setTasks, workers, setWorkers, messages, setMessages}) {
+  const [showAdd,setShowAdd] = useState(false);
+  const [f,setF] = useState({title:"",pri:"high",project:"Operations",assignee:"",deadline:"",delivery:"",note:""});
+  const [announce,setAnnounce] = useState("");
 
-  const openTasks = tasks.filter(t => !t.done).length;
-  const doneTasks = tasks.filter(t => t.done).length;
-  const overdue = tasks.filter(t => t.deadline && daysLeft(t.deadline) < 0 && !t.done).length;
-  const onlineWorkers = workers.filter(w => w.online);
+  const openTasks = tasks.filter(t=>!t.done).length;
+  const doneTasks = tasks.filter(t=>t.done).length;
+  const overdue   = tasks.filter(t=>t.deadline&&daysLeft(t.deadline)<0&&!t.done).length;
 
   const addTask = () => {
-    if (!newTitle.trim()) return;
-    const task = {
-      title: newTitle.trim(), priority: newPri, project: newProject,
-      due: today(), deadline: newDeadline, delivery: newDelivery,
-      done: false, assignee: newAssignee, createdBy: me.name,
-      pinned: false, ts: Date.now(),
-    };
-    if (db) push(ref(db, "tasks"), task);
-    else setTasks(ts => [...ts, { ...task, id: Date.now().toString() }]);
-    setNewTitle(""); setNewAssignee(""); setNewDeadline(""); setNewDelivery(""); setShowAddTask(false);
+    if(!f.title.trim()) return;
+    const task = {...f, title:f.title.trim(), due:todayISO(), done:false, createdBy:me.name, ts:Date.now()};
+    if(db) push(ref(db,"tasks"),task);
+    else setTasks(ts=>[...ts,{...task,id:uid()}]);
+    setF({title:"",pri:"high",project:"Operations",assignee:"",deadline:"",delivery:"",note:""});
+    setShowAdd(false);
   };
 
-  const deleteTask = (task, e) => {
-    e.stopPropagation();
-    if (db) remove(ref(db, `tasks/${task.id}`));
-    else setTasks(ts => ts.filter(t => t.id !== task.id));
+  const deleteTask = (task,e) => { e.stopPropagation(); if(db) remove(ref(db,`tasks/${task.id}`)); else setTasks(ts=>ts.filter(t=>t.id!==task.id)); };
+
+  const removeWorker = (w) => {
+    if(!window.confirm(`Remove ${w.name} from the team?`)) return;
+    if(db) remove(ref(db,`workers/${w.id}`));
+    else setWorkers(ws=>ws.filter(x=>x.id!==w.id));
   };
 
-  const removeWorker = (worker) => {
-    if (!window.confirm(`Remove ${worker.name} from the team?`)) return;
-    if (db) remove(ref(db, `workers/${worker.id}`));
-    else setWorkers(ws => ws.filter(w => w.id !== worker.id));
+  const pinAnnounce = () => {
+    if(!announce.trim()) return;
+    const time = new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+    const msg = {uid:me.id, name:me.name, color:me.color, isOwner:true, text:`📌 ANNOUNCEMENT: ${announce.trim()}`, time, channel:"general", pinned:true, ts:Date.now()};
+    if(db) push(ref(db,"messages"),msg);
+    else setMessages(m=>[...m,{...msg,id:uid()}]);
+    setAnnounce("");
   };
 
-  const pinAnnouncement = () => {
-    if (!announcement.trim()) return;
-    const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const msg = { name: me.name, color: me.color, text: `📌 ANNOUNCEMENT: ${announcement.trim()}`, time, channel: "general", pinned: true, ts: Date.now() };
-    if (db) push(ref(db, "messages"), msg);
-    else setMessages(m => [...m, { ...msg, id: Date.now().toString() }]);
-    setAnnouncement("");
-  };
-
-  const addToCalendar = (task) => {
-    if (!task.deadline) return;
-    const title = encodeURIComponent(`DAWW CREATIONS: ${task.title}`);
-    const date = task.deadline.replace(/-/g, "");
-    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${date}/${date}&details=${encodeURIComponent(`Project: ${task.project}\nAssigned to: ${task.assignee || "Unassigned"}`)}`;
-    window.open(url, "_blank");
-  };
-
-  const upcomingDeadlines = tasks
-    .filter(t => t.deadline && !t.done)
-    .sort((a, b) => new Date(a.deadline) - new Date(b.deadline))
-    .slice(0, 6);
+  const field = (label,key,type="text",placeholder="") => (
+    <div style={{marginBottom:10}}>
+      <div style={{fontSize:10,color:C.textMuted,fontWeight:700,letterSpacing:1,marginBottom:4,fontFamily:"'DM Mono',monospace"}}>{label}</div>
+      <input type={type} value={f[key]} onChange={e=>setF(x=>({...x,[key]:e.target.value}))} placeholder={placeholder}
+        style={{width:"100%",background:C.bg,border:`1px solid ${C.borderBright}`,borderRadius:8,padding:"8px 12px",fontSize:13,color:C.text,outline:"none"}}/>
+    </div>
+  );
 
   return (
-    <div style={{ padding: "0 16px 32px", animation: "fadeUp 0.3s ease" }}>
-
-      {/* Owner welcome */}
-      <div style={{ padding: "14px 0 10px", display: "flex", alignItems: "center", gap: 10 }}>
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 800 }}>
-            👑 <span style={{ color: C.goldBright }}>Owner Dashboard</span>
-          </div>
-          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
-            {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-          </div>
-        </div>
+    <div style={{padding:"0 16px 32px",animation:"fadeUp .3s ease"}}>
+      <div style={{padding:"14px 0 6px"}}>
+        <div style={{fontSize:18,fontWeight:800}}>👑 <span style={{color:C.goldBright}}>Owner Dashboard</span></div>
+        <div style={{fontSize:11,color:C.textMuted,marginTop:2}}>{new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
       </div>
-
-      {/* Gold divider */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-        <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${C.goldBright}88, transparent)` }} />
-        <div style={{ width: 5, height: 5, background: C.goldBright, transform: "rotate(45deg)" }} />
-        <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, transparent, ${C.taupe}22)` }} />
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
+        <div style={{flex:1,height:1,background:`linear-gradient(90deg,${C.goldBright}88,transparent)`}}/>
+        <div style={{width:5,height:5,background:C.goldBright,transform:"rotate(45deg)"}}/>
+        <div style={{flex:1,height:1,background:`linear-gradient(90deg,transparent,${C.taupe}22)`}}/>
       </div>
 
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
-        {[
-          { label: "Open Tasks",   val: openTasks,              color: C.redBright },
-          { label: "Completed",    val: doneTasks,              color: C.green },
-          { label: "Team Online",  val: onlineWorkers.length || 1, color: C.taupe },
-          { label: "Overdue",      val: overdue,                color: overdue > 0 ? C.alert : C.textMuted },
-        ].map(s => (
-          <div key={s.label} style={{ background: C.surfaceHigh, border: `1px solid ${C.border}`, borderTop: `2px solid ${s.color}`, borderRadius: 12, padding: 14 }}>
-            <div style={{ fontSize: 26, fontWeight: 800, color: s.color, fontFamily: "'DM Mono', monospace" }}>{s.val}</div>
-            <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3, fontWeight: 600 }}>{s.label}</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18}}>
+        {[{l:"Open Tasks",v:openTasks,c:C.redBright},{l:"Completed",v:doneTasks,c:C.green},{l:"Team Members",v:workers.length,c:C.taupe},{l:"Overdue",v:overdue,c:overdue>0?C.alert:C.textMuted}].map(s=>(
+          <div key={s.l} style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderTop:`2px solid ${s.c}`,borderRadius:12,padding:14}}>
+            <div style={{fontSize:26,fontWeight:800,color:s.c,fontFamily:"'DM Mono',monospace"}}>{s.v}</div>
+            <div style={{fontSize:10,color:C.textMuted,marginTop:3,fontWeight:600}}>{s.l}</div>
           </div>
         ))}
       </div>
 
-      {/* Pin Announcement */}
-      <div style={{ background: C.surfaceHigh, border: `1px solid ${C.goldBright}33`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
-        <div style={{ fontSize: 11, color: C.goldBright, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10, fontFamily: "'DM Mono', monospace" }}>📌 PIN ANNOUNCEMENT TO TEAM</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input value={announcement} onChange={e => setAnnouncement(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && pinAnnouncement()}
-            placeholder="Type important message for the whole team…"
-            style={{ flex: 1, background: C.bg, border: `1px solid ${C.borderBright}`, borderRadius: 8, padding: "9px 12px", fontSize: 12, color: C.text, outline: "none" }}
-          />
-          <button onClick={pinAnnouncement} style={{ background: `linear-gradient(135deg, ${C.goldBright}, #a07020)`, border: "none", borderRadius: 8, padding: "9px 14px", cursor: "pointer", fontSize: 13, color: C.bg, fontWeight: 800 }}>Pin</button>
+      {/* Pin announcement */}
+      <div style={{background:C.surfaceHigh,border:`1px solid ${C.goldBright}33`,borderRadius:14,padding:16,marginBottom:14}}>
+        <div style={{fontSize:11,color:C.goldBright,fontWeight:700,letterSpacing:1.5,marginBottom:10,fontFamily:"'DM Mono',monospace"}}>📌 PIN ANNOUNCEMENT</div>
+        <div style={{display:"flex",gap:8}}>
+          <input value={announce} onChange={e=>setAnnounce(e.target.value)} onKeyDown={e=>e.key==="Enter"&&pinAnnounce()}
+            placeholder="Important message for the whole team…"
+            style={{flex:1,background:C.bg,border:`1px solid ${C.borderBright}`,borderRadius:8,padding:"9px 12px",fontSize:12,color:C.text,outline:"none"}}/>
+          <button onClick={pinAnnounce} style={{background:`linear-gradient(135deg,${C.goldBright},#a07020)`,border:"none",borderRadius:8,padding:"9px 14px",cursor:"pointer",fontSize:12,color:C.bg,fontWeight:800}}>Pin</button>
         </div>
       </div>
 
-      {/* Add Task */}
-      <div style={{ background: C.surfaceHigh, border: `1px solid ${C.border}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: showAddTask ? 14 : 0 }}>
-          <div style={{ fontSize: 11, color: C.redBright, fontWeight: 700, letterSpacing: 1.5, fontFamily: "'DM Mono', monospace" }}>➕ ADD TASK</div>
-          <button onClick={() => setShowAddTask(s => !s)} style={{ background: showAddTask ? C.redDim : `linear-gradient(135deg, ${C.redBright}, #7a1010)`, border: `1px solid ${C.redBright}44`, borderRadius: 8, padding: "5px 14px", cursor: "pointer", fontSize: 11, color: showAddTask ? C.redBright : "white", fontWeight: 700 }}>
-            {showAddTask ? "Cancel" : "+ New Task"}
+      {/* Add task */}
+      <div style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:14,padding:16,marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showAdd?14:0}}>
+          <div style={{fontSize:11,color:C.redBright,fontWeight:700,letterSpacing:1.5,fontFamily:"'DM Mono',monospace"}}>➕ ADD TASK</div>
+          <button onClick={()=>setShowAdd(s=>!s)} style={{background:showAdd?C.redDim:`linear-gradient(135deg,${C.redBright},#7a1010)`,border:`1px solid ${C.redBright}44`,borderRadius:8,padding:"5px 14px",cursor:"pointer",fontSize:11,color:showAdd?C.redBright:"white",fontWeight:700}}>
+            {showAdd?"Cancel":"+ New Task"}
           </button>
         </div>
-
-        {showAddTask && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <input value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="Task title…"
-              style={{ background: C.bg, border: `1px solid ${C.borderBright}`, borderRadius: 8, padding: "9px 12px", fontSize: 13, color: C.text, outline: "none" }} />
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        {showAdd && (
+          <div>
+            {field("TASK TITLE","title","text","What needs to be done?")}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
               <div>
-                <div style={{ fontSize: 10, color: C.textMuted, fontWeight: 700, letterSpacing: 1, marginBottom: 4, fontFamily: "'DM Mono', monospace" }}>PRIORITY</div>
-                <select value={newPri} onChange={e => setNewPri(e.target.value)}
-                  style={{ width: "100%", background: C.bg, border: `1px solid ${C.borderBright}`, borderRadius: 8, padding: "8px 10px", fontSize: 12, color: C.text, outline: "none" }}>
-                  {PRIORITIES.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}
+                <div style={{fontSize:10,color:C.textMuted,fontWeight:700,letterSpacing:1,marginBottom:4,fontFamily:"'DM Mono',monospace"}}>PRIORITY</div>
+                <select value={f.pri} onChange={e=>setF(x=>({...x,pri:e.target.value}))} style={{width:"100%",background:C.bg,border:`1px solid ${C.borderBright}`,borderRadius:8,padding:"8px 10px",fontSize:12,color:C.text,outline:"none"}}>
+                  <option value="high">HIGH</option><option value="med">MED</option><option value="low">LOW</option>
                 </select>
               </div>
               <div>
-                <div style={{ fontSize: 10, color: C.textMuted, fontWeight: 700, letterSpacing: 1, marginBottom: 4, fontFamily: "'DM Mono', monospace" }}>PROJECT</div>
-                <select value={newProject} onChange={e => setNewProject(e.target.value)}
-                  style={{ width: "100%", background: C.bg, border: `1px solid ${C.borderBright}`, borderRadius: 8, padding: "8px 10px", fontSize: 12, color: C.text, outline: "none" }}>
-                  {PROJECTS.map(p => <option key={p} value={p}>{p}</option>)}
+                <div style={{fontSize:10,color:C.textMuted,fontWeight:700,letterSpacing:1,marginBottom:4,fontFamily:"'DM Mono',monospace"}}>PROJECT</div>
+                <select value={f.project} onChange={e=>setF(x=>({...x,project:e.target.value}))} style={{width:"100%",background:C.bg,border:`1px solid ${C.borderBright}`,borderRadius:8,padding:"8px 10px",fontSize:12,color:C.text,outline:"none"}}>
+                  {PROJECTS.map(p=><option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
             </div>
-
-            <div>
-              <div style={{ fontSize: 10, color: C.textMuted, fontWeight: 700, letterSpacing: 1, marginBottom: 4, fontFamily: "'DM Mono', monospace" }}>ASSIGN TO</div>
-              <select value={newAssignee} onChange={e => setNewAssignee(e.target.value)}
-                style={{ width: "100%", background: C.bg, border: `1px solid ${C.borderBright}`, borderRadius: 8, padding: "8px 10px", fontSize: 12, color: C.text, outline: "none" }}>
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:10,color:C.textMuted,fontWeight:700,letterSpacing:1,marginBottom:4,fontFamily:"'DM Mono',monospace"}}>ASSIGN TO</div>
+              <select value={f.assignee} onChange={e=>setF(x=>({...x,assignee:e.target.value}))} style={{width:"100%",background:C.bg,border:`1px solid ${C.borderBright}`,borderRadius:8,padding:"8px 10px",fontSize:12,color:C.text,outline:"none"}}>
                 <option value="">— Unassigned —</option>
-                {workers.map(w => <option key={w.id} value={w.name}>{w.name} ({w.role})</option>)}
+                {workers.map(w=><option key={w.id} value={w.name}>{w.name} ({w.role})</option>)}
               </select>
             </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <div>
-                <div style={{ fontSize: 10, color: C.textMuted, fontWeight: 700, letterSpacing: 1, marginBottom: 4, fontFamily: "'DM Mono', monospace" }}>DEADLINE</div>
-                <input type="date" value={newDeadline} onChange={e => setNewDeadline(e.target.value)}
-                  style={{ width: "100%", background: C.bg, border: `1px solid ${C.borderBright}`, borderRadius: 8, padding: "8px 10px", fontSize: 12, color: C.text, outline: "none" }} />
-              </div>
-              <div>
-                <div style={{ fontSize: 10, color: C.textMuted, fontWeight: 700, letterSpacing: 1, marginBottom: 4, fontFamily: "'DM Mono', monospace" }}>DELIVERY DATE</div>
-                <input type="date" value={newDelivery} onChange={e => setNewDelivery(e.target.value)}
-                  style={{ width: "100%", background: C.bg, border: `1px solid ${C.borderBright}`, borderRadius: 8, padding: "8px 10px", fontSize: 12, color: C.text, outline: "none" }} />
-              </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {field("DEADLINE","deadline","date")}
+              {field("DELIVERY DATE","delivery","date")}
             </div>
-
-            <button onClick={addTask} style={{ background: `linear-gradient(135deg, ${C.redBright}, #7a1010)`, border: "none", borderRadius: 10, padding: "11px", cursor: "pointer", fontSize: 13, color: "white", fontWeight: 800, boxShadow: `0 0 12px ${C.redGlow}` }}>
-              Create Task →
-            </button>
+            {field("NOTE (optional)","note","text","Any extra details…")}
+            <button onClick={addTask} style={{width:"100%",padding:"11px",borderRadius:10,border:"none",background:`linear-gradient(135deg,${C.redBright},#7a1010)`,color:"white",fontSize:13,fontWeight:800,cursor:"pointer",boxShadow:`0 0 12px ${C.redGlow}`}}>Create Task →</button>
           </div>
         )}
       </div>
 
-      {/* Deadlines & Deliveries Overview */}
-      {upcomingDeadlines.length > 0 && (
-        <div style={{ background: C.surfaceHigh, border: `1px solid ${C.border}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
-          <div style={{ fontSize: 11, color: C.purple, fontWeight: 700, letterSpacing: 1.5, marginBottom: 12, fontFamily: "'DM Mono', monospace" }}>📅 DEADLINES & DELIVERIES</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {upcomingDeadlines.map(t => (
-              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: C.bg, borderRadius: 8, border: `1px solid ${C.border}` }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
-                    {t.deadline && <DeadlinePill deadline={t.deadline} />}
-                    {t.delivery && <span style={{ fontSize: 9, color: C.taupe, fontFamily: "'DM Mono', monospace" }}>📦 {fmtDate(t.delivery)}</span>}
-                    {t.assignee && <span style={{ fontSize: 10, color: C.textMuted }}>→ {t.assignee}</span>}
-                  </div>
-                </div>
-                {t.deadline && (
-                  <button onClick={() => addToCalendar(t)} title="Add to Google Calendar" style={{ background: C.accentDim, border: `1px solid ${C.border}`, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12, color: C.textDim, fontWeight: 700 }}>📆</button>
-                )}
+      {/* All tasks */}
+      <div style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:14,padding:16,marginBottom:14}}>
+        <div style={{fontSize:11,color:C.redBright,fontWeight:700,letterSpacing:1.5,marginBottom:12,fontFamily:"'DM Mono',monospace"}}>🗂 ALL TASKS</div>
+        {tasks.length===0 && <div style={{fontSize:12,color:C.textMuted}}>No tasks yet.</div>}
+        {tasks.map(t=>(
+          <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:C.bg,borderRadius:8,border:`1px solid ${t.done?C.border:C.borderBright}`,marginBottom:6,opacity:t.done?.45:1}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:600,color:C.text,textDecoration:t.done?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.title}</div>
+              <div style={{display:"flex",gap:6,marginTop:3,flexWrap:"wrap",alignItems:"center"}}>
+                <PriBadge p={t.priority}/>
+                {t.assignee&&<span style={{fontSize:10,color:C.taupe}}>→ {t.assignee}</span>}
+                {t.deadline&&<DeadlinePill deadline={t.deadline}/>}
+                {t.delivery&&<span style={{fontSize:9,color:C.blue,fontFamily:"'DM Mono',monospace",fontWeight:700}}>📦 {fmtDate(t.delivery)}</span>}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* All Tasks overview with delete */}
-      <div style={{ background: C.surfaceHigh, border: `1px solid ${C.border}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
-        <div style={{ fontSize: 11, color: C.redBright, fontWeight: 700, letterSpacing: 1.5, marginBottom: 12, fontFamily: "'DM Mono', monospace" }}>🗂 ALL TASKS OVERVIEW</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {tasks.length === 0 && <div style={{ fontSize: 12, color: C.textMuted }}>No tasks yet. Add one above.</div>}
-          {tasks.map(t => (
-            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: C.bg, borderRadius: 8, border: `1px solid ${t.done ? C.border : C.borderBright}`, opacity: t.done ? 0.5 : 1 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: C.text, textDecoration: t.done ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
-                <div style={{ display: "flex", gap: 6, marginTop: 3, flexWrap: "wrap", alignItems: "center" }}>
-                  <PriBadge p={t.priority} />
-                  {t.assignee && <span style={{ fontSize: 10, color: C.taupe }}>→ {t.assignee}</span>}
-                  {t.deadline && <DeadlinePill deadline={t.deadline} />}
-                  {t.done && <span style={{ fontSize: 10, color: C.green }}>✓ Done</span>}
-                </div>
-              </div>
-              <button onClick={(e) => deleteTask(t, e)} style={{ background: `${C.alert}18`, border: `1px solid ${C.alert}33`, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 11, color: C.alert, fontWeight: 700, flexShrink: 0 }}>✕</button>
             </div>
-          ))}
-        </div>
+            <button onClick={e=>deleteTask(t,e)} style={{background:C.alertDim,border:`1px solid ${C.alert}33`,borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:11,color:C.alert,fontWeight:700,flexShrink:0}}>✕</button>
+          </div>
+        ))}
       </div>
 
-      {/* Team Management */}
-      <div style={{ background: C.surfaceHigh, border: `1px solid ${C.border}`, borderRadius: 14, padding: 16 }}>
-        <div style={{ fontSize: 11, color: C.taupe, fontWeight: 700, letterSpacing: 1.5, marginBottom: 12, fontFamily: "'DM Mono', monospace" }}>👥 TEAM MANAGEMENT</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {(workers.length === 0 ? [me] : workers).map((w, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: C.bg, borderRadius: 8, border: `1px solid ${w.name === OWNER_NAME ? C.goldBright + "33" : C.border}` }}>
-              <Avatar name={w.name} color={w.color || C.taupe} size={30} isOwner={w.name === OWNER_NAME} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{w.name}</div>
-                <div style={{ fontSize: 10, color: C.textMuted }}>{w.role}</div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 7, height: 7, borderRadius: "50%", background: w.online ? C.green : C.textMuted }} />
-                {w.name !== OWNER_NAME && (
-                  <button onClick={() => removeWorker(w)} style={{ background: `${C.alert}18`, border: `1px solid ${C.alert}33`, borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 10, color: C.alert, fontWeight: 700 }}>Remove</button>
-                )}
-              </div>
+      {/* Team management */}
+      <div style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:14,padding:16}}>
+        <div style={{fontSize:11,color:C.taupe,fontWeight:700,letterSpacing:1.5,marginBottom:12,fontFamily:"'DM Mono',monospace"}}>👥 TEAM MANAGEMENT</div>
+        {workers.map((w,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:C.bg,borderRadius:8,border:`1px solid ${w.isOwner?C.goldBright+"33":C.border}`,marginBottom:6}}>
+            <Avatar name={w.name} color={w.color||C.taupe} size={30} isOwner={w.isOwner||w.name===OWNER_NAME}/>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.text}}>{w.name}</div>
+              <div style={{fontSize:10,color:C.textMuted}}>{w.role} · {w.email||""}</div>
             </div>
-          ))}
-        </div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <div style={{width:7,height:7,borderRadius:"50%",background:w.online?C.green:C.textMuted}}/>
+              {!w.isOwner&&w.name!==OWNER_NAME&&(
+                <button onClick={()=>removeWorker(w)} style={{background:C.alertDim,border:`1px solid ${C.alert}33`,borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:10,color:C.alert,fontWeight:700}}>Remove</button>
+              )}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -483,326 +682,238 @@ function OwnerDashboard({ me, tasks, setTasks, workers, setWorkers, messages, se
 // MAIN APP
 // ─────────────────────────────────────────────────────────────────────────────
 export default function DAWWApp() {
-  const [me, setMe]             = useState(null);
-  const [view, setView]         = useState("dashboard");
-  const [messages, setMessages] = useState([]);
-  const [tasks, setTasks]       = useState(DEFAULT_TASKS.map((t, i) => ({ ...t, id: `t${i}` })));
-  const [workers, setWorkers]   = useState([]);
-  const [channel, setChannel]   = useState("general");
-  const [chatInput, setChatInput] = useState("");
-  const [newTask, setNewTask]   = useState("");
-  const [newTaskPri, setNewTaskPri] = useState("med");
-  const [connected, setConnected] = useState(false);
-  const bottomRef = useRef(null);
+  const [me,setMe]             = useState(null);
+  const [authReady,setAuthReady] = useState(false);
+  const [view,setView]         = useState("dashboard");
+  const [messages,setMessages] = useState([]);
+  const [tasks,setTasks]       = useState([]);
+  const [workers,setWorkers]   = useState([]);
+  const [connected,setConnected] = useState(false);
 
-  const isOwner = me?.name === OWNER_NAME;
-
-  useEffect(() => {
-    if (!db || !me) return;
-    const workerRef = ref(db, `workers/${me.id}`);
-    set(workerRef, { ...me, online: true, lastSeen: serverTimestamp() });
-
-    const u1 = onValue(ref(db, "workers"), snap => {
-      const data = snap.val();
-      if (data) { setWorkers(Object.values(data)); setConnected(true); }
-    });
-    const u2 = onValue(ref(db, "messages"), snap => {
-      const data = snap.val();
-      if (data) {
-        const msgs = Object.entries(data).map(([id, v]) => ({ id, ...v }));
-        msgs.sort((a, b) => (a.ts || 0) - (b.ts || 0));
-        setMessages(msgs); setConnected(true);
+  // Auth listener
+  useEffect(()=>{
+    if(!auth) { setAuthReady(true); return; }
+    return onAuthStateChanged(auth, async user=>{
+      if(user) {
+        // load profile from db
+        onValue(ref(db,`workers/${user.uid}`), snap=>{
+          const profile = snap.val();
+          if(profile) {
+            setMe(profile);
+            setView(profile.isOwner?"owner":"dashboard");
+          }
+        },{onlyOnce:true});
+      } else {
+        setMe(null);
       }
+      setAuthReady(true);
     });
-    const u3 = onValue(ref(db, "tasks"), snap => {
-      const data = snap.val();
-      if (data) {
-        setTasks(Object.entries(data).map(([id, v]) => ({ id, ...v })));
-        setConnected(true);
-      } else if (isOwner) {
-        DEFAULT_TASKS.forEach(t => push(ref(db, "tasks"), { ...t, createdBy: me.name }));
-      }
-    });
-    return () => { u1(); u2(); u3(); };
-  }, [me]);
+  },[]);
 
-  useEffect(() => {
-    if (view === "chat") bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, view]);
+  // Firebase subscriptions
+  useEffect(()=>{
+    if(!db||!me) return;
+    update(ref(db,`workers/${me.id}`),{online:true,lastSeen:serverTimestamp()});
+    const u1=onValue(ref(db,"workers"),snap=>{ const d=snap.val(); if(d){setWorkers(Object.values(d));setConnected(true);} });
+    const u2=onValue(ref(db,"messages"),snap=>{ const d=snap.val(); if(d){ const m=Object.entries(d).map(([id,v])=>({id,...v})); m.sort((a,b)=>(a.ts||0)-(b.ts||0)); setMessages(m); setConnected(true); } });
+    const u3=onValue(ref(db,"tasks"),snap=>{ const d=snap.val(); if(d){ setTasks(Object.entries(d).map(([id,v])=>({id,...v}))); setConnected(true); } });
+    return ()=>{u1();u2();u3();};
+  },[me]);
 
-  const sendMessage = () => {
-    if (!chatInput.trim()) return;
-    const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const msg = { name: me.name, color: me.color, text: chatInput.trim(), time, channel, ts: Date.now(), isOwner };
-    if (db) push(ref(db, "messages"), msg);
-    else setMessages(m => [...m, { ...msg, id: Date.now().toString() }]);
-    setChatInput("");
+  const logout = async () => {
+    if(db&&me) update(ref(db,`workers/${me.id}`),{online:false});
+    if(auth) await signOut(auth);
+    setMe(null); setView("dashboard");
   };
 
   const toggleTask = (task) => {
-    const updated = { ...task, done: !task.done, doneBy: !task.done ? me.name : "" };
-    if (db) update(ref(db, `tasks/${task.id}`), { done: updated.done, doneBy: updated.doneBy });
-    else setTasks(ts => ts.map(t => t.id === task.id ? updated : t));
+    const updated={...task,done:!task.done,doneBy:!task.done?me.name:""};
+    if(db) update(ref(db,`tasks/${task.id}`),{done:updated.done,doneBy:updated.doneBy});
+    else setTasks(ts=>ts.map(t=>t.id===task.id?updated:t));
   };
 
-  const addTask = () => {
-    if (!newTask.trim()) return;
-    const task = { title: newTask.trim(), priority: newTaskPri, project: "General", due: today(), deadline: "", done: false, assignee: me.name, createdBy: me.name, ts: Date.now() };
-    if (db) push(ref(db, "tasks"), task);
-    else setTasks(ts => [...ts, { ...task, id: Date.now().toString() }]);
-    setNewTask("");
+  const addQuickTask = (title,pri) => {
+    if(!title.trim()) return;
+    const task={title:title.trim(),priority:pri,project:"General",due:todayISO(),deadline:"",delivery:"",done:false,assignee:me.name,createdBy:me.name,ts:Date.now()};
+    if(db) push(ref(db,"tasks"),task);
+    else setTasks(ts=>[...ts,{...task,id:uid()}]);
   };
 
-  if (!me) return <SetupScreen onJoin={w => { setMe(w); setView(w.isOwner ? "owner" : "dashboard"); }} />;
+  if(!authReady) return (
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
+      <DAWWLogo size={56}/>
+      <div style={{color:C.textMuted,fontSize:12,fontFamily:"'DM Mono',sans-serif",letterSpacing:2}}>LOADING…</div>
+    </div>
+  );
 
-  const openTasks = tasks.filter(t => !t.done).length;
-  const doneTasks = tasks.filter(t => t.done).length;
-  const pct = tasks.length ? Math.round((doneTasks / tasks.length) * 100) : 0;
-  const visibleMsgs = messages.filter(m => m.channel === channel);
+  if(!me) return <AuthScreen onAuth={p=>{setMe(p);setView(p.isOwner?"owner":"dashboard");}}/>;
+
+  const isOwner = me.isOwner||me.name===OWNER_NAME;
+  const openTasks = tasks.filter(t=>!t.done).length;
+  const doneTasks = tasks.filter(t=>t.done).length;
+  const pct = tasks.length?Math.round((doneTasks/tasks.length)*100):0;
+  const pinned = messages.filter(m=>m.pinned);
 
   const nav = isOwner
-    ? [
-        { id: "owner",     label: "Owner",  icon: "👑" },
-        { id: "tasks",     label: "Tasks",  icon: "✓", badge: openTasks || null },
-        { id: "chat",      label: "Chat",   icon: "◉" },
-        { id: "dashboard", label: "Team",   icon: "◈" },
-      ]
-    : [
-        { id: "dashboard", label: "Home",  icon: "⌂" },
-        { id: "tasks",     label: "Tasks", icon: "✓", badge: openTasks || null },
-        { id: "chat",      label: "Chat",  icon: "◉" },
-        { id: "team",      label: "Team",  icon: "◈" },
-      ];
+    ? [{id:"owner",label:"Owner",icon:"👑"},{id:"tasks",label:"Tasks",icon:"✓",badge:openTasks||null},{id:"chat",label:"Chat",icon:"◉"},{id:"calendar",label:"Calendar",icon:"📅"}]
+    : [{id:"dashboard",label:"Home",icon:"⌂"},{id:"tasks",label:"Tasks",icon:"✓",badge:openTasks||null},{id:"chat",label:"Chat",icon:"◉"},{id:"calendar",label:"Calendar",icon:"📅"}];
+
+  const accentColor = isOwner?C.goldBright:C.redBright;
+  const accentGlow  = isOwner?C.goldGlow:C.redGlow;
 
   return (
-    <div style={{ background: C.bg, minHeight: "100vh", maxWidth: 480, margin: "0 auto", fontFamily: "'Sora', sans-serif", color: C.text, display: "flex", flexDirection: "column" }}>
+    <div style={{background:C.bg,minHeight:"100vh",maxWidth:480,margin:"0 auto",fontFamily:"'Sora',sans-serif",color:C.text,display:"flex",flexDirection:"column"}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=DM+Mono:wght@400;700&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        ::-webkit-scrollbar { width: 3px; }
-        ::-webkit-scrollbar-thumb { background: #2a2222; border-radius: 99px; }
-        input, select { font-family: 'Sora', sans-serif; }
-        input::placeholder { color: #3a2e2e; }
-        @keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-        @keyframes goldglow { 0%,100%{filter:drop-shadow(0 0 8px #d4a85344)} 50%{filter:drop-shadow(0 0 18px #d4a85388)} }
+        *{box-sizing:border-box;margin:0;padding:0;}
+        ::-webkit-scrollbar{width:3px;}
+        ::-webkit-scrollbar-thumb{background:#2a2222;border-radius:99px;}
+        input,select,textarea{font-family:'Sora',sans-serif;}
+        input::placeholder,textarea::placeholder{color:#3a2e2e;}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+        @keyframes goldglow{0%,100%{filter:drop-shadow(0 0 8px #d4a85344)}50%{filter:drop-shadow(0 0 18px #d4a85388)}}
       `}</style>
 
       {/* HEADER */}
-      <div style={{ background: C.surface, borderBottom: `1px solid ${isOwner ? C.goldBright + "33" : C.border}`, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100, boxShadow: isOwner ? `0 2px 20px ${C.goldGlow}` : "none" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ animation: "goldglow 3s infinite" }}><DAWWLogo size={30} /></div>
+      <div style={{background:C.surface,borderBottom:`1px solid ${isOwner?C.goldBright+"33":C.border}`,padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100,boxShadow:isOwner?`0 2px 20px ${C.goldGlow}`:"none"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{animation:"goldglow 3s infinite"}}><DAWWLogo size={30}/></div>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: 1.5, textTransform: "uppercase" }}>
-              DAWW <span style={{ color: isOwner ? C.goldBright : C.redBright }}>CREATIONS</span>
-            </div>
-            <div style={{ fontSize: 9, color: isOwner ? C.goldBright : C.textMuted, letterSpacing: 2, fontFamily: "'DM Mono', monospace" }}>
-              {isOwner ? "👑 OWNER MODE" : "TEAM SYNC"}
-            </div>
+            <div style={{fontSize:13,fontWeight:800,letterSpacing:1.5,textTransform:"uppercase"}}>DAWW <span style={{color:accentColor}}>CREATIONS</span></div>
+            <div style={{fontSize:9,color:isOwner?C.goldBright:C.textMuted,letterSpacing:2,fontFamily:"'DM Mono',monospace"}}>{isOwner?"👑 OWNER MODE":"TEAM SYNC"}</div>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <div style={{ width: 7, height: 7, borderRadius: "50%", background: connected ? C.green : C.amber, animation: "pulse 2s infinite" }} />
-            <span style={{ fontSize: 9, color: connected ? C.green : C.amber, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>{connected ? "LIVE" : "DEMO"}</span>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:5}}>
+            <div style={{width:7,height:7,borderRadius:"50%",background:connected?C.green:C.amber,animation:"pulse 2s infinite"}}/>
+            <span style={{fontSize:9,color:connected?C.green:C.amber,fontFamily:"'DM Mono',monospace",fontWeight:700}}>{connected?"LIVE":"DEMO"}</span>
           </div>
-          <Avatar name={me.name} color={me.color} size={28} isOwner={isOwner} />
+          <div onClick={logout} style={{cursor:"pointer"}} title="Log out">
+            <Avatar name={me.name} color={me.color||C.taupe} size={28} isOwner={isOwner}/>
+          </div>
         </div>
       </div>
 
       {/* CONTENT */}
-      <div style={{ flex: 1, overflowY: view === "chat" ? "hidden" : "auto", display: "flex", flexDirection: "column" }}>
+      <div style={{flex:1,overflowY:view==="chat"?"hidden":"auto",display:"flex",flexDirection:"column"}}>
 
-        {/* OWNER DASHBOARD */}
-        {view === "owner" && isOwner && (
-          <OwnerDashboard me={me} tasks={tasks} setTasks={setTasks} workers={workers} setWorkers={setWorkers} messages={messages} setMessages={setMessages} setView={setView} />
-        )}
+        {/* OWNER */}
+        {view==="owner"&&isOwner&&<OwnerDashboard me={me} tasks={tasks} setTasks={setTasks} workers={workers} setWorkers={setWorkers} messages={messages} setMessages={setMessages}/>}
 
-        {/* TEAM DASHBOARD */}
-        {view === "dashboard" && (
-          <div style={{ padding: "0 16px 32px", animation: "fadeUp 0.3s ease" }}>
-            <div style={{ padding: "16px 0 6px" }}>
-              <div style={{ fontSize: 20, fontWeight: 800 }}>Welcome, <span style={{ color: C.redBright }}>{me.name.split(" ")[0]}</span> 👷</div>
-              <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>{me.role} · {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, marginBottom: 16 }}>
-                <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${C.redBright}66, transparent)` }} />
-                <div style={{ width: 5, height: 5, background: C.redBright, transform: "rotate(45deg)" }} />
-                <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, transparent, ${C.taupe}33)` }} />
+        {/* DASHBOARD */}
+        {view==="dashboard"&&(
+          <div style={{padding:"0 16px 32px",animation:"fadeUp .3s ease"}}>
+            <div style={{padding:"16px 0 6px"}}>
+              <div style={{fontSize:20,fontWeight:800}}>Welcome, <span style={{color:C.redBright}}>{me.name.split(" ")[0]}</span> 👷</div>
+              <div style={{fontSize:12,color:C.textMuted,marginTop:3}}>{me.role} · {new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginTop:12,marginBottom:16}}>
+                <div style={{flex:1,height:1,background:`linear-gradient(90deg,${C.redBright}66,transparent)`}}/>
+                <div style={{width:5,height:5,background:C.redBright,transform:"rotate(45deg)"}}/>
+                <div style={{flex:1,height:1,background:`linear-gradient(90deg,transparent,${C.taupe}33)`}}/>
               </div>
             </div>
 
             {/* Pinned announcements */}
-            {messages.filter(m => m.pinned).length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                {messages.filter(m => m.pinned).slice(-2).map(m => (
-                  <div key={m.id} style={{ background: `${C.goldBright}12`, border: `1px solid ${C.goldBright}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
-                    <div style={{ fontSize: 10, color: C.goldBright, fontWeight: 700, letterSpacing: 1, marginBottom: 4, fontFamily: "'DM Mono', monospace" }}>📌 PINNED BY OWNER</div>
-                    <div style={{ fontSize: 13, color: C.text }}>{m.text.replace("📌 ANNOUNCEMENT: ", "")}</div>
-                  </div>
-                ))}
+            {pinned.slice(-2).map(m=>(
+              <div key={m.id} style={{background:`${C.goldBright}12`,border:`1px solid ${C.goldBright}44`,borderRadius:10,padding:"10px 14px",marginBottom:10}}>
+                <div style={{fontSize:10,color:C.goldBright,fontWeight:700,letterSpacing:1,marginBottom:4,fontFamily:"'DM Mono',monospace"}}>📌 OWNER ANNOUNCEMENT</div>
+                <div style={{fontSize:13,color:C.text}}>{m.text.replace("📌 ANNOUNCEMENT: ","")}</div>
               </div>
-            )}
+            ))}
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-              {[
-                { label: "Open Tasks", val: openTasks, color: C.redBright },
-                { label: "Completed",  val: doneTasks, color: C.green },
-                { label: "Team",       val: workers.length || 1, color: C.taupe },
-                { label: "Messages",   val: messages.length, color: C.gold },
-              ].map(s => (
-                <div key={s.label} style={{ background: C.surfaceHigh, border: `1px solid ${C.border}`, borderTop: `2px solid ${s.color}`, borderRadius: 12, padding: 14 }}>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: s.color, fontFamily: "'DM Mono', monospace" }}>{s.val}</div>
-                  <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3, fontWeight: 600 }}>{s.label}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+              {[{l:"Open Tasks",v:openTasks,c:C.redBright},{l:"Completed",v:doneTasks,c:C.green},{l:"Team",v:workers.length||1,c:C.taupe},{l:"Messages",v:messages.length,c:C.gold}].map(s=>(
+                <div key={s.l} style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderTop:`2px solid ${s.c}`,borderRadius:12,padding:14}}>
+                  <div style={{fontSize:26,fontWeight:800,color:s.c,fontFamily:"'DM Mono',monospace"}}>{s.v}</div>
+                  <div style={{fontSize:10,color:C.textMuted,marginTop:3,fontWeight:600}}>{s.l}</div>
                 </div>
               ))}
             </div>
 
-            <div style={{ background: C.surfaceHigh, border: `1px solid ${C.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: C.taupeLight }}>Today's Progress</div>
-                <div style={{ fontSize: 14, fontWeight: 800, color: C.redBright, fontFamily: "'DM Mono', monospace" }}>{pct}%</div>
+            <div style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:14,padding:16,marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+                <div style={{fontSize:13,fontWeight:700,color:C.taupeLight}}>Today's Progress</div>
+                <div style={{fontSize:14,fontWeight:800,color:C.redBright,fontFamily:"'DM Mono',monospace"}}>{pct}%</div>
               </div>
-              <ProgressBar value={pct} />
-              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 8 }}>{doneTasks} of {tasks.length} tasks complete</div>
+              <ProgressBar value={pct}/>
+              <div style={{fontSize:11,color:C.textMuted,marginTop:8}}>{doneTasks} of {tasks.length} tasks complete</div>
             </div>
 
-            {/* My tasks */}
-            <div style={{ fontSize: 10, color: C.textMuted, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10, textTransform: "uppercase", fontFamily: "'DM Mono', monospace" }}>My Tasks</div>
-            {tasks.filter(t => t.assignee === me.name && !t.done).slice(0, 4).map(t => (
-              <div key={t.id} onClick={() => toggleTask(t)} style={{ background: C.surfaceHigh, border: `1px solid ${C.borderBright}`, borderRadius: 10, padding: "10px 14px", marginBottom: 8, display: "flex", gap: 10, cursor: "pointer" }}>
-                <div style={{ width: 18, height: 18, borderRadius: 5, flexShrink: 0, marginTop: 1, border: `2px solid ${C.borderBright}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10 }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t.title}</div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
-                    <PriBadge p={t.priority} />
-                    {t.deadline && <DeadlinePill deadline={t.deadline} />}
-                  </div>
+            {/* My upcoming deadlines */}
+            {tasks.filter(t=>t.assignee===me.name&&t.deadline&&!t.done).slice(0,3).map(t=>(
+              <div key={t.id} style={{background:C.surfaceHigh,border:`1px solid ${C.borderBright}`,borderRadius:10,padding:"10px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:600}}>{t.title}</div>
+                  <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap"}}><DeadlinePill deadline={t.deadline}/>{t.delivery&&<span style={{fontSize:9,color:C.blue,fontFamily:"'DM Mono',monospace",fontWeight:700}}>📦 {fmtDate(t.delivery)}</span>}</div>
                 </div>
+                <PriBadge p={t.priority}/>
               </div>
             ))}
+
+            <button onClick={logout} style={{width:"100%",marginTop:20,padding:"10px",borderRadius:10,border:`1px solid ${C.border}`,background:"transparent",color:C.textDim,fontSize:12,fontWeight:600,cursor:"pointer"}}>Sign Out</button>
           </div>
         )}
 
         {/* TASKS */}
-        {view === "tasks" && (
-          <div style={{ padding: "0 16px 32px", animation: "fadeUp 0.3s ease" }}>
-            <div style={{ padding: "16px 0 14px", fontSize: 20, fontWeight: 800 }}>
-              <span style={{ color: C.redBright }}>Tasks</span> · <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 15 }}>{openTasks} open</span>
-            </div>
-
-            {!isOwner && (
-              <div style={{ background: C.surfaceHigh, border: `1px solid ${C.borderBright}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input value={newTask} onChange={e => setNewTask(e.target.value)} onKeyDown={e => e.key === "Enter" && addTask()}
-                    placeholder="Add a quick task…"
-                    style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 12px", fontSize: 13, color: C.text, outline: "none" }} />
-                  <button onClick={addTask} style={{ background: `linear-gradient(135deg, ${C.redBright}, #7a1010)`, border: "none", borderRadius: 8, padding: "9px 14px", cursor: "pointer", color: "white", fontSize: 13, fontWeight: 800 }}>+</button>
+        {view==="tasks"&&(()=>{
+          const [newTask,setNewTask]=useState("");
+          const [pri,setPri]=useState("med");
+          return (
+            <div style={{padding:"0 16px 32px",animation:"fadeUp .3s ease"}}>
+              <div style={{padding:"16px 0 14px",fontSize:20,fontWeight:800}}><span style={{color:C.redBright}}>Tasks</span> · <span style={{fontFamily:"'DM Mono',monospace",fontSize:15}}>{openTasks} open</span></div>
+              <div style={{background:C.surfaceHigh,border:`1px solid ${C.borderBright}`,borderRadius:12,padding:14,marginBottom:16}}>
+                <div style={{display:"flex",gap:8,marginBottom:8}}>
+                  <input value={newTask} onChange={e=>setNewTask(e.target.value)} onKeyDown={e=>e.key==="Enter"&&(addQuickTask(newTask,pri),setNewTask(""))}
+                    placeholder="Add a task…" style={{flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 12px",fontSize:13,color:C.text,outline:"none"}}/>
+                  <button onClick={()=>{addQuickTask(newTask,pri);setNewTask("");}} style={{background:`linear-gradient(135deg,${C.redBright},#7a1010)`,border:"none",borderRadius:8,padding:"9px 14px",cursor:"pointer",color:"white",fontSize:13,fontWeight:800}}>+</button>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  {["high","med","low"].map(p=>(
+                    <button key={p} onClick={()=>setPri(p)} style={{padding:"4px 12px",borderRadius:6,fontSize:10,fontWeight:800,border:`1px solid ${pri===p?(p==="high"?C.alert:p==="med"?C.amber:C.textDim):C.border}`,background:pri===p?`${p==="high"?C.alert:p==="med"?C.amber:C.textDim}18`:"transparent",color:pri===p?(p==="high"?C.alert:p==="med"?C.amber:C.textDim):C.textMuted,cursor:"pointer",textTransform:"uppercase",letterSpacing:1,fontFamily:"'DM Mono',monospace"}}>{p}</button>
+                  ))}
                 </div>
               </div>
-            )}
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {tasks.map(t => (
-                <div key={t.id} onClick={() => toggleTask(t)} style={{ background: t.done ? C.surface : C.surfaceHigh, border: `1px solid ${t.done ? C.border : C.borderBright}`, borderRadius: 12, padding: "12px 14px", display: "flex", gap: 12, alignItems: "flex-start", cursor: "pointer", opacity: t.done ? 0.45 : 1, transition: "opacity 0.2s" }}>
-                  <div style={{ width: 20, height: 20, borderRadius: 5, flexShrink: 0, marginTop: 1, border: `2px solid ${t.done ? C.green : C.borderBright}`, background: t.done ? C.greenDim : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: C.green, fontWeight: 900 }}>{t.done ? "✓" : ""}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, textDecoration: t.done ? "line-through" : "none" }}>{t.title}</div>
-                    <div style={{ display: "flex", gap: 6, marginTop: 5, flexWrap: "wrap", alignItems: "center" }}>
-                      <PriBadge p={t.priority} />
-                      {t.assignee && <span style={{ fontSize: 11, color: C.taupe }}>→ {t.assignee}</span>}
-                      {t.deadline && <DeadlinePill deadline={t.deadline} />}
-                      {t.delivery && <span style={{ fontSize: 9, color: C.purple, fontFamily: "'DM Mono', monospace" }}>📦 {fmtDate(t.delivery)}</span>}
-                      {t.done && t.doneBy && <span style={{ fontSize: 11, color: C.green }}>✓ {t.doneBy}</span>}
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {tasks.map(t=>(
+                  <div key={t.id} onClick={()=>toggleTask(t)} style={{background:t.done?C.surface:C.surfaceHigh,border:`1px solid ${t.done?C.border:C.borderBright}`,borderRadius:12,padding:"12px 14px",display:"flex",gap:12,alignItems:"flex-start",cursor:"pointer",opacity:t.done?.45:1,transition:"opacity .2s"}}>
+                    <div style={{width:20,height:20,borderRadius:5,flexShrink:0,marginTop:1,border:`2px solid ${t.done?C.green:C.borderBright}`,background:t.done?C.greenDim:"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:C.green,fontWeight:900}}>{t.done?"✓":""}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:600,textDecoration:t.done?"line-through":"none"}}>{t.title}</div>
+                      <div style={{display:"flex",gap:6,marginTop:5,flexWrap:"wrap",alignItems:"center"}}>
+                        <PriBadge p={t.priority}/>
+                        {t.assignee&&<span style={{fontSize:11,color:C.taupe}}>→ {t.assignee}</span>}
+                        {t.deadline&&<DeadlinePill deadline={t.deadline}/>}
+                        {t.delivery&&<span style={{fontSize:9,color:C.blue,fontFamily:"'DM Mono',monospace",fontWeight:700}}>📦 {fmtDate(t.delivery)}</span>}
+                        {t.done&&t.doneBy&&<span style={{fontSize:11,color:C.green}}>✓ {t.doneBy}</span>}
+                        {t.note&&<span style={{fontSize:10,color:C.textMuted,fontStyle:"italic"}}>{t.note}</span>}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* CHAT */}
-        {view === "chat" && (
-          <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: "calc(100vh - 145px)", animation: "fadeUp 0.3s ease" }}>
-            <div style={{ display: "flex", gap: 6, padding: "8px 16px", borderBottom: `1px solid ${C.border}`, overflowX: "auto" }}>
-              {["general","safety","logistics","updates"].map(ch => (
-                <button key={ch} onClick={() => setChannel(ch)} style={{ padding: "5px 12px", borderRadius: 8, fontSize: 10, fontWeight: 700, border: `1px solid ${channel === ch ? C.redBright : C.border}`, background: channel === ch ? C.redDim : "transparent", color: channel === ch ? C.redBright : C.textMuted, cursor: "pointer", whiteSpace: "nowrap", textTransform: "uppercase", letterSpacing: 0.8, fontFamily: "'DM Mono', monospace" }}>#{ch}</button>
-              ))}
-            </div>
+        {view==="chat"&&<ChatView me={me} messages={messages} setMessages={setMessages} isOwner={isOwner}/>}
 
-            <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
-              {visibleMsgs.length === 0 && <div style={{ textAlign: "center", color: C.textMuted, marginTop: 60, fontSize: 13 }}>No messages in #{channel} yet.<br/>Be the first to say something 👇</div>}
-              {visibleMsgs.map((msg, i) => {
-                const isMine = msg.name === me.name;
-                const prevSame = i > 0 && visibleMsgs[i-1].name === msg.name;
-                const msgIsOwner = msg.name === OWNER_NAME;
-                return (
-                  <div key={msg.id} style={{ display: "flex", gap: 10, flexDirection: isMine ? "row-reverse" : "row", animation: "fadeUp 0.2s ease" }}>
-                    {!isMine && !prevSame && <Avatar name={msg.name} color={msg.color || C.taupe} size={28} isOwner={msgIsOwner} />}
-                    {!isMine && prevSame && <div style={{ width: 28 }} />}
-                    <div style={{ maxWidth: "78%" }}>
-                      {!prevSame && !isMine && (
-                        <div style={{ fontSize: 11, color: msgIsOwner ? C.goldBright : msg.color || C.taupe, fontWeight: 700, marginBottom: 3 }}>
-                          {msg.name}{msgIsOwner ? " 👑" : ""} · <span style={{ color: C.textMuted, fontWeight: 400 }}>{msg.time}</span>
-                        </div>
-                      )}
-                      <div style={{
-                        background: isMine ? C.redDim : msgIsOwner ? `${C.goldBright}12` : C.surfaceHigh,
-                        border: `1px solid ${isMine ? C.redBright + "44" : msgIsOwner ? C.goldBright + "44" : C.border}`,
-                        borderRadius: isMine ? "14px 4px 14px 14px" : "4px 14px 14px 14px",
-                        padding: "9px 13px", fontSize: 13, color: C.text, lineHeight: 1.55,
-                      }}>{msg.text}</div>
-                      {isMine && <div style={{ fontSize: 10, color: C.textMuted, textAlign: "right", marginTop: 3 }}>{msg.time}</div>}
-                    </div>
-                  </div>
-                );
-              })}
-              <div ref={bottomRef} />
-            </div>
-
-            <div style={{ padding: "10px 16px 16px", borderTop: `1px solid ${C.border}`, display: "flex", gap: 8 }}>
-              <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === "Enter" && sendMessage()}
-                placeholder={`Message #${channel}…`}
-                style={{ flex: 1, background: C.surfaceHigh, border: `1px solid ${isOwner ? C.goldBright + "44" : C.borderBright}`, borderRadius: 10, padding: "10px 14px", fontSize: 13, color: C.text, outline: "none" }} />
-              <button onClick={sendMessage} style={{ background: isOwner ? `linear-gradient(135deg, ${C.goldBright}, #a07020)` : `linear-gradient(135deg, ${C.redBright}, #7a1010)`, border: "none", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontSize: 15, color: isOwner ? C.bg : "white", fontWeight: 900 }}>↑</button>
-            </div>
-          </div>
-        )}
-
-        {/* TEAM VIEW */}
-        {view === "team" && (
-          <div style={{ padding: "0 16px 32px", animation: "fadeUp 0.3s ease" }}>
-            <div style={{ padding: "16px 0 16px", fontSize: 20, fontWeight: 800 }}><span style={{ color: C.redBright }}>DAWW</span> Team</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {(workers.length > 0 ? workers : [me]).map((w, i) => (
-                <div key={i} style={{ background: C.surfaceHigh, border: `1px solid ${w.name === OWNER_NAME ? C.goldBright + "44" : C.border}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
-                  <Avatar name={w.name} color={w.color || C.taupe} size={34} isOwner={w.name === OWNER_NAME} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>{w.name}{w.name === me.name ? <span style={{ color: C.textMuted, fontSize: 11, fontWeight: 400 }}> (you)</span> : ""}</div>
-                    <div style={{ fontSize: 11, color: C.textMuted }}>{w.role}</div>
-                  </div>
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: w.online ? C.green : C.textMuted }} />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* CALENDAR */}
+        {view==="calendar"&&<CalendarView tasks={tasks} isOwner={isOwner}/>}
       </div>
 
       {/* BOTTOM NAV */}
-      <div style={{ background: C.surface, borderTop: `1px solid ${isOwner ? C.goldBright + "33" : C.border}`, display: "flex", padding: "8px 0 max(8px, env(safe-area-inset-bottom))", position: "sticky", bottom: 0, zIndex: 100 }}>
-        {nav.map(item => (
-          <button key={item.id} onClick={() => setView(item.id)} style={{ flex: 1, background: "none", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "4px 0", color: view === item.id ? (isOwner ? C.goldBright : C.redBright) : C.textMuted, position: "relative" }}>
-            {item.badge && (
-              <div style={{ position: "absolute", top: 0, right: "calc(50% - 18px)", background: C.redBright, borderRadius: 99, minWidth: 16, height: 16, fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", color: "white", border: `2px solid ${C.surface}`, fontFamily: "'DM Mono', monospace" }}>{item.badge}</div>
-            )}
-            <div style={{ fontSize: 16 }}>{item.icon}</div>
-            <div style={{ fontSize: 10, fontWeight: view === item.id ? 700 : 500, fontFamily: "'DM Mono', monospace", letterSpacing: 0.3 }}>{item.label}</div>
-            {view === item.id && <div style={{ position: "absolute", bottom: -2, width: 24, height: 2, background: isOwner ? C.goldBright : C.redBright, borderRadius: 99, boxShadow: `0 0 8px ${isOwner ? C.goldGlow : C.redGlow}` }} />}
+      <div style={{background:C.surface,borderTop:`1px solid ${isOwner?C.goldBright+"33":C.border}`,display:"flex",padding:"8px 0 max(8px,env(safe-area-inset-bottom))",position:"sticky",bottom:0,zIndex:100}}>
+        {nav.map(item=>(
+          <button key={item.id} onClick={()=>setView(item.id)} style={{flex:1,background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"4px 0",color:view===item.id?accentColor:C.textMuted,position:"relative"}}>
+            {item.badge&&<div style={{position:"absolute",top:0,right:"calc(50% - 18px)",background:C.redBright,borderRadius:99,minWidth:16,height:16,fontSize:9,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",color:"white",border:`2px solid ${C.surface}`,fontFamily:"'DM Mono',monospace"}}>{item.badge}</div>}
+            <div style={{fontSize:16}}>{item.icon}</div>
+            <div style={{fontSize:10,fontWeight:view===item.id?700:500,fontFamily:"'DM Mono',monospace",letterSpacing:.3}}>{item.label}</div>
+            {view===item.id&&<div style={{position:"absolute",bottom:-2,width:24,height:2,background:accentColor,borderRadius:99,boxShadow:`0 0 8px ${accentGlow}`}}/>}
           </button>
         ))}
       </div>
     </div>
   );
 }
-
