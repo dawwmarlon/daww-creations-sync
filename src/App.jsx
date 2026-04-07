@@ -620,6 +620,32 @@ function OwnerDashboard({me, tasks, setTasks, workers, setWorkers, messages, set
     else setWorkers(ws=>ws.filter(x=>x.id!==w.id));
   };
 
+  const cleanupDuplicates = () => {
+    // Keep only the most recent profile per email/name combination
+    const seen = {};
+    const toDelete = [];
+    // Sort by joinedAt so we keep the latest
+    const sorted = [...workers].sort((a,b)=>(b.joinedAt||0)-(a.joinedAt||0));
+    sorted.forEach(w => {
+      const key = (w.email||w.name||"").toLowerCase();
+      if(seen[key]) {
+        toDelete.push(w); // duplicate — delete older one
+      } else {
+        seen[key] = true;
+      }
+    });
+    if(toDelete.length===0) {
+      alert("No duplicates found! Your team list is clean ✓");
+      return;
+    }
+    if(!window.confirm(`Found ${toDelete.length} duplicate profile${toDelete.length>1?"s":""}. Remove them now?`)) return;
+    toDelete.forEach(w => {
+      if(db) remove(ref(db,`workers/${w.id}`));
+      else setWorkers(ws=>ws.filter(x=>x.id!==w.id));
+    });
+    alert(`Removed ${toDelete.length} duplicate${toDelete.length>1?"s":""}! ✓`);
+  };
+
   const pinAnnounce = () => {
     if(!announce.trim()) return;
     const time = new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
@@ -734,18 +760,26 @@ function OwnerDashboard({me, tasks, setTasks, workers, setWorkers, messages, set
 
       {/* Team management */}
       <div style={{background:C.surfaceHigh,border:`1px solid ${C.border}`,borderRadius:14,padding:16}}>
-        <div style={{fontSize:11,color:C.taupe,fontWeight:700,letterSpacing:1.5,marginBottom:12,fontFamily:"'DM Mono',monospace"}}>👥 TEAM MANAGEMENT</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div style={{fontSize:11,color:C.taupe,fontWeight:700,letterSpacing:1.5,fontFamily:"'DM Mono',monospace"}}>👥 TEAM MANAGEMENT</div>
+          <button onClick={cleanupDuplicates} style={{background:`${C.purple}22`,border:`1px solid ${C.purple}44`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,color:C.purple,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>
+            🧹 Remove Duplicates
+          </button>
+        </div>
+        <div style={{fontSize:11,color:C.textMuted,marginBottom:10}}>
+          {workers.length} member{workers.length!==1?"s":""} registered
+        </div>
         {workers.map((w,i)=>(
-          <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:C.bg,borderRadius:8,border:`1px solid ${w.isOwner?C.goldBright+"33":C.border}`,marginBottom:6}}>
+          <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:C.bg,borderRadius:8,border:`1px solid ${w.isOwner||w.name===OWNER_NAME?C.goldBright+"33":C.border}`,marginBottom:6}}>
             <Avatar name={w.name} color={w.color||C.taupe} size={30} isOwner={w.isOwner||w.name===OWNER_NAME}/>
-            <div style={{flex:1}}>
+            <div style={{flex:1,minWidth:0}}>
               <div style={{fontSize:12,fontWeight:700,color:C.text}}>{w.name}</div>
-              <div style={{fontSize:10,color:C.textMuted}}>{w.role} · {w.email||""}</div>
+              <div style={{fontSize:10,color:C.textMuted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{w.role}{w.email?` · ${w.email}`:""}</div>
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
               <div style={{width:7,height:7,borderRadius:"50%",background:w.online?C.green:C.textMuted}}/>
-              {!w.isOwner&&w.name!==OWNER_NAME&&(
-                <button onClick={()=>removeWorker(w)} style={{background:C.alertDim,border:`1px solid ${C.alert}33`,borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:10,color:C.alert,fontWeight:700}}>Remove</button>
+              {(!w.isOwner&&w.name!==OWNER_NAME&&w.email!==OWNER_EMAIL) && (
+                <button onClick={()=>removeWorker(w)} style={{background:C.alertDim,border:`1px solid ${C.alert}33`,borderRadius:6,padding:"5px 10px",cursor:"pointer",fontSize:11,color:C.alert,fontWeight:700}}>Remove</button>
               )}
             </div>
           </div>
