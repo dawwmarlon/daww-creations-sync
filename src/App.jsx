@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import {
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  GoogleAuthProvider, signInWithPopup,
   signOut, onAuthStateChanged, updateProfile
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
@@ -9,10 +10,10 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DAWW CREATIONS — Full Platform v3
-// Owner: Marlon George
+// DAWW CREATIONS — Full Platform v4
+// Owner: Marlon George — dawwmarlon@gmail.com
 // ─────────────────────────────────────────────────────────────────────────────
-const OWNER_EMAIL = "owner@dawwcreations.com"; // Change to your real email
+const OWNER_EMAIL = "dawwmarlon@gmail.com";
 const OWNER_NAME  = "Marlon George";
 
 const firebaseConfig = {
@@ -137,7 +138,7 @@ function Btn({children,onClick,color=C.redBright,disabled=false,small=false,outl
 // AUTH SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
 function AuthScreen({onAuth}) {
-  const [mode,setMode]       = useState("login"); // login | signup
+  const [mode,setMode]       = useState("login");
   const [name,setName]       = useState("");
   const [email,setEmail]     = useState("");
   const [password,setPass]   = useState("");
@@ -146,8 +147,38 @@ function AuthScreen({onAuth}) {
   const [err,setErr]         = useState("");
   const [loading,setLoading] = useState(false);
 
-  const isOwnerSignup = email.trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
+  const isOwnerEmail = email.trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
 
+  // ── Google Sign-In ───────────────────────────────────────────────────────
+  const signInWithGoogle = async () => {
+    setErr(""); setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      const cred = await signInWithPopup(auth, provider);
+      const user  = cred.user;
+      const isOwner = user.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
+      // Check if profile already exists
+      const snap = await new Promise(res => onValue(ref(db,`workers/${user.uid}`), res, {onlyOnce:true}));
+      if(!snap.val()) {
+        // First time — create profile
+        const profile = {
+          id: user.uid, name: user.displayName||user.email,
+          role: isOwner ? "Owner" : "Crew Member",
+          color: isOwner ? C.goldBright : WORKER_COLORS[Math.floor(Math.random()*WORKER_COLORS.length)],
+          email: user.email, isOwner,
+          online: true, joinedAt: Date.now(),
+        };
+        await set(ref(db,`workers/${user.uid}`), profile);
+        onAuth(profile);
+      }
+      // If profile exists, onAuthStateChanged in main app handles it
+    } catch(e) {
+      if(e.code !== "auth/popup-closed-by-user") setErr("Google sign-in failed. Please try again.");
+    }
+    setLoading(false);
+  };
+
+  // ── Email/Password ───────────────────────────────────────────────────────
   const submit = async () => {
     setErr(""); setLoading(true);
     try {
@@ -155,18 +186,19 @@ function AuthScreen({onAuth}) {
         if(!name.trim()) { setErr("Please enter your name."); setLoading(false); return; }
         const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
         await updateProfile(cred.user, {displayName: name.trim()});
+        const isOwner = isOwnerEmail;
         const profile = {
           id: cred.user.uid, name: name.trim(),
-          role: isOwnerSignup ? "Owner" : role,
-          color: isOwnerSignup ? C.goldBright : color,
-          email: email.trim(), isOwner: isOwnerSignup,
+          role: isOwner ? "Owner" : role,
+          color: isOwner ? C.goldBright : color,
+          email: email.trim(), isOwner,
           online: true, joinedAt: Date.now(),
         };
         await set(ref(db,`workers/${cred.user.uid}`), profile);
         onAuth(profile);
       } else {
-        const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-        // profile loaded in main app via onAuthStateChanged
+        await signInWithEmailAndPassword(auth, email.trim(), password);
+        // profile loaded via onAuthStateChanged in main app
       }
     } catch(e) {
       const msgs = {
@@ -207,11 +239,35 @@ function AuthScreen({onAuth}) {
 
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:20,padding:26,width:"100%",maxWidth:380,boxShadow:`0 0 50px ${C.redGlow}`,animation:"fadeUp .6s ease"}}>
 
+        {/* Google Sign-In Button */}
+        <button onClick={signInWithGoogle} disabled={loading} style={{
+          width:"100%", padding:"12px", borderRadius:12, marginBottom:16,
+          border:`1px solid ${C.borderBright}`, background:C.surfaceHigh,
+          color:C.text, fontSize:13, fontWeight:700, cursor:"pointer",
+          display:"flex", alignItems:"center", justifyContent:"center", gap:10,
+          transition:"all .2s", fontFamily:"'Sora',sans-serif",
+        }}>
+          <svg width="18" height="18" viewBox="0 0 48 48">
+            <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.2l6.8-6.8C35.8 2.5 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.1C12.4 13.2 17.7 9.5 24 9.5z"/>
+            <path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8C43.6 37.5 46.5 31.4 46.5 24.5z"/>
+            <path fill="#FBBC05" d="M10.5 28.6A14.8 14.8 0 0 1 9.5 24c0-1.6.3-3.1.8-4.6L2.4 13.3A23.8 23.8 0 0 0 0 24c0 3.8.9 7.4 2.5 10.6l8-6z"/>
+            <path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7.5-5.8c-2 1.4-4.6 2.2-7.7 2.2-6.3 0-11.6-3.7-13.5-9l-8 6.1C6.6 42.6 14.6 48 24 48z"/>
+          </svg>
+          {loading ? "Please wait…" : "Continue with Google"}
+        </button>
+
+        {/* Divider */}
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+          <div style={{flex:1,height:1,background:C.border}}/>
+          <span style={{fontSize:11,color:C.textMuted,fontFamily:"'DM Mono',monospace"}}>OR</span>
+          <div style={{flex:1,height:1,background:C.border}}/>
+        </div>
+
         {/* Tabs */}
-        <div style={{display:"flex",gap:0,marginBottom:22,background:C.surfaceHigh,borderRadius:10,padding:3}}>
+        <div style={{display:"flex",gap:0,marginBottom:18,background:C.surfaceHigh,borderRadius:10,padding:3}}>
           {["login","signup"].map(m=>(
             <button key={m} onClick={()=>{setMode(m);setErr("");}} style={{flex:1,padding:"8px",borderRadius:8,border:"none",background:mode===m?C.redBright:"transparent",color:mode===m?"white":C.textMuted,fontSize:12,fontWeight:700,cursor:"pointer",textTransform:"uppercase",letterSpacing:1,fontFamily:"'DM Mono',monospace",transition:"all .2s"}}>
-              {m==="login"?"Log In":"Sign Up"}
+              {m==="login"?"Email Login":"Email Sign Up"}
             </button>
           ))}
         </div>
@@ -223,7 +279,7 @@ function AuthScreen({onAuth}) {
         <Input label="EMAIL ADDRESS" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@email.com"/>
         <Input label="PASSWORD" type="password" value={password} onChange={e=>setPass(e.target.value)} placeholder="Min. 6 characters" error={err}/>
 
-        {mode==="signup" && !isOwnerSignup && (
+        {mode==="signup" && !isOwnerEmail && (
           <>
             <div style={{marginBottom:14}}>
               <label style={{fontSize:10,color:C.textMuted,fontWeight:700,letterSpacing:1.5,display:"block",marginBottom:6,fontFamily:"'DM Mono',monospace"}}>YOUR ROLE</label>
@@ -242,13 +298,13 @@ function AuthScreen({onAuth}) {
           </>
         )}
 
-        {mode==="signup" && isOwnerSignup && (
+        {mode==="signup" && isOwnerEmail && (
           <div style={{background:`${C.goldBright}12`,border:`1px solid ${C.goldBright}44`,borderRadius:8,padding:"10px 12px",marginBottom:16,fontSize:11,color:C.goldBright,fontWeight:700}}>
             👑 Owner account detected — you'll have full admin access.
           </div>
         )}
 
-        <Btn onClick={submit} disabled={loading} color={isOwnerSignup?C.goldBright:C.redBright}>
+        <Btn onClick={submit} disabled={loading} color={isOwnerEmail?C.goldBright:C.redBright}>
           {loading?"Please wait…":mode==="login"?"Log In →":"Create Account →"}
         </Btn>
 
@@ -405,15 +461,23 @@ function CalendarView({tasks, isOwner}) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CHAT VIEW (with edit & delete for own messages)
+// CHAT VIEW — with fully visible Edit & Delete buttons for all users
 // ─────────────────────────────────────────────────────────────────────────────
 function ChatView({me, messages, setMessages, isOwner}) {
-  const [channel,setChannel] = useState("general");
-  const [input,setInput]     = useState("");
-  const [editing,setEditing] = useState(null); // {id, text}
+  const [channel,setChannel]   = useState("general");
+  const [input,setInput]       = useState("");
+  const [editing,setEditing]   = useState(null); // {id, text}
+  const [menuOpen,setMenuOpen] = useState(null); // msg id with open action menu
   const bottomRef = useRef(null);
 
   useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:"smooth"}); },[messages,channel]);
+
+  // Close menu when tapping elsewhere
+  useEffect(()=>{
+    const close = ()=>setMenuOpen(null);
+    document.addEventListener("click", close);
+    return ()=>document.removeEventListener("click", close);
+  },[]);
 
   const send = () => {
     if(!input.trim()) return;
@@ -432,14 +496,17 @@ function ChatView({me, messages, setMessages, isOwner}) {
   };
 
   const deleteMsg = (id) => {
+    if(!window.confirm("Delete this message?")) return;
     if(db) remove(ref(db,`messages/${id}`));
     else setMessages(ms=>ms.filter(m=>m.id!==id));
+    setMenuOpen(null);
   };
 
   const visible = messages.filter(m=>m.channel===channel);
 
   return (
     <div style={{display:"flex",flexDirection:"column",flex:1,minHeight:"calc(100vh - 145px)",animation:"fadeUp .3s ease"}}>
+
       {/* Channels */}
       <div style={{display:"flex",gap:6,padding:"8px 16px",borderBottom:`1px solid ${C.border}`,overflowX:"auto"}}>
         {CHANNELS.map(ch=>(
@@ -448,53 +515,78 @@ function ChatView({me, messages, setMessages, isOwner}) {
       </div>
 
       {/* Messages */}
-      <div style={{flex:1,overflowY:"auto",padding:"14px 16px",display:"flex",flexDirection:"column",gap:12}}>
-        {visible.length===0 && <div style={{textAlign:"center",color:C.textMuted,marginTop:60,fontSize:13}}>No messages in #{channel} yet.<br/>Be the first to say something 👇</div>}
+      <div style={{flex:1,overflowY:"auto",padding:"14px 16px",display:"flex",flexDirection:"column",gap:14}}>
+        {visible.length===0 && (
+          <div style={{textAlign:"center",color:C.textMuted,marginTop:60,fontSize:13}}>
+            No messages in #{channel} yet.<br/>Be the first to say something 👇
+          </div>
+        )}
 
         {visible.map((msg,i)=>{
           const isMine = msg.uid===me.id || msg.name===me.name;
-          const prevSame = i>0 && visible[i-1].name===msg.name;
-          const msgOwner = msg.isOwner||msg.name===OWNER_NAME;
+          const canDelete = isMine || isOwner;
+          const canEdit   = isMine;
+          const prevSame  = i>0 && visible[i-1].name===msg.name;
+          const msgOwner  = msg.isOwner||msg.name===OWNER_NAME;
           const isEditing = editing?.id===msg.id;
+          const isMenuOpen = menuOpen===msg.id;
 
           return (
-            <div key={msg.id} style={{display:"flex",gap:10,flexDirection:isMine?"row-reverse":"row",animation:"fadeUp .2s ease"}}>
-              {!isMine&&!prevSame && <Avatar name={msg.name} color={msg.color||C.taupe} size={28} isOwner={msgOwner}/>}
-              {!isMine&&prevSame && <div style={{width:28}}/>}
-              <div style={{maxWidth:"78%"}}>
+            <div key={msg.id} style={{display:"flex",gap:10,flexDirection:isMine?"row-reverse":"row",animation:"fadeUp .2s ease",position:"relative"}}>
+              {!isMine&&!prevSame && <Avatar name={msg.name} color={msg.color||C.taupe} size={30} isOwner={msgOwner}/>}
+              {!isMine&&prevSame && <div style={{width:30}}/>}
+
+              <div style={{maxWidth:"75%",display:"flex",flexDirection:"column",alignItems:isMine?"flex-end":"flex-start"}}>
+
+                {/* Sender name */}
                 {!prevSame&&!isMine && (
-                  <div style={{fontSize:11,color:msgOwner?C.goldBright:msg.color||C.taupe,fontWeight:700,marginBottom:3}}>
+                  <div style={{fontSize:11,color:msgOwner?C.goldBright:msg.color||C.taupe,fontWeight:700,marginBottom:4}}>
                     {msg.name}{msgOwner?" 👑":""} · <span style={{color:C.textMuted,fontWeight:400}}>{msg.time}</span>
-                    {msg.edited&&<span style={{color:C.textMuted,fontSize:9,marginLeft:4}}>(edited)</span>}
                   </div>
                 )}
 
+                {/* Edit mode */}
                 {isEditing ? (
-                  <div style={{display:"flex",gap:6,flexDirection:"column"}}>
+                  <div style={{display:"flex",gap:6,flexDirection:"column",width:"100%"}}>
                     <textarea value={editing.text} onChange={e=>setEditing(ed=>({...ed,text:e.target.value}))}
-                      style={{background:C.surfaceHigh,border:`1px solid ${C.redBright}44`,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.text,outline:"none",resize:"none",minHeight:60,fontFamily:"'Sora',sans-serif",width:220}}/>
-                    <div style={{display:"flex",gap:6}}>
-                      <button onClick={()=>saveEdit(msg.id)} style={{background:`linear-gradient(135deg,${C.green},${C.green}99)`,border:"none",borderRadius:7,padding:"5px 14px",cursor:"pointer",fontSize:12,color:"white",fontWeight:700}}>Save</button>
-                      <button onClick={()=>setEditing(null)} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 14px",cursor:"pointer",fontSize:12,color:C.textMuted,fontWeight:700}}>Cancel</button>
+                      rows={3}
+                      style={{background:C.surfaceHigh,border:`1px solid ${C.redBright}66`,borderRadius:10,padding:"10px 13px",fontSize:13,color:C.text,outline:"none",resize:"vertical",fontFamily:"'Sora',sans-serif",minWidth:200}}/>
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={()=>saveEdit(msg.id)} style={{flex:1,background:`linear-gradient(135deg,${C.green},#2e7d52)`,border:"none",borderRadius:8,padding:"8px",cursor:"pointer",fontSize:12,color:"white",fontWeight:800}}>✓ Save</button>
+                      <button onClick={()=>setEditing(null)} style={{flex:1,background:"transparent",border:`1px solid ${C.border}`,borderRadius:8,padding:"8px",cursor:"pointer",fontSize:12,color:C.textMuted,fontWeight:700}}>✕ Cancel</button>
                     </div>
                   </div>
                 ) : (
-                  <div style={{position:"relative"}}>
-                    <div style={{background:isMine?C.redDim:msgOwner?`${C.goldBright}12`:C.surfaceHigh,border:`1px solid ${isMine?C.redBright+"44":msgOwner?C.goldBright+"44":C.border}`,borderRadius:isMine?"14px 4px 14px 14px":"4px 14px 14px 14px",padding:"9px 13px",fontSize:13,color:C.text,lineHeight:1.55}}>
+                  <>
+                    {/* Message bubble */}
+                    <div style={{background:isMine?C.redDim:msgOwner?`${C.goldBright}12`:C.surfaceHigh,border:`1px solid ${isMine?C.redBright+"55":msgOwner?C.goldBright+"44":C.border}`,borderRadius:isMine?"16px 4px 16px 16px":"4px 16px 16px 16px",padding:"10px 14px",fontSize:13,color:C.text,lineHeight:1.6,wordBreak:"break-word"}}>
                       {msg.text}
                     </div>
-                    {isMine && (
-                      <div style={{display:"flex",gap:6,marginTop:4,justifyContent:"flex-end"}}>
-                        <span style={{fontSize:10,color:C.textMuted}}>{msg.time}{msg.edited?" · edited":""}</span>
-                        <button onClick={()=>setEditing({id:msg.id,text:msg.text})} style={{background:"none",border:"none",cursor:"pointer",fontSize:10,color:C.textDim,padding:"0 2px"}}>✏️</button>
-                        <button onClick={()=>deleteMsg(msg.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:10,color:C.alert,padding:"0 2px"}}>🗑</button>
-                      </div>
-                    )}
-                    {/* Owner can delete any message */}
-                    {!isMine && isOwner && (
-                      <button onClick={()=>deleteMsg(msg.id)} style={{position:"absolute",top:-6,right:-6,background:C.alertDim,border:`1px solid ${C.alert}44`,borderRadius:"50%",width:18,height:18,cursor:"pointer",fontSize:9,color:C.alert,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-                    )}
-                  </div>
+
+                    {/* Time + action buttons row — ALWAYS VISIBLE for own messages */}
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5,flexDirection:isMine?"row":"row"}}>
+                      {isMine && <span style={{fontSize:10,color:C.textMuted}}>{msg.time}{msg.edited?" · edited":""}</span>}
+                      {!isMine && msg.edited && <span style={{fontSize:10,color:C.textMuted,marginLeft:4}}>(edited)</span>}
+
+                      {/* Edit button — own messages only */}
+                      {canEdit && (
+                        <button
+                          onClick={e=>{e.stopPropagation();setEditing({id:msg.id,text:msg.text});setMenuOpen(null);}}
+                          style={{display:"flex",alignItems:"center",gap:4,background:C.surfaceHigh,border:`1px solid ${C.borderBright}`,borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:11,color:C.textDim,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>
+                          ✏ Edit
+                        </button>
+                      )}
+
+                      {/* Delete button — own messages + owner can delete anyone */}
+                      {canDelete && (
+                        <button
+                          onClick={e=>{e.stopPropagation();deleteMsg(msg.id);}}
+                          style={{display:"flex",alignItems:"center",gap:4,background:C.alertDim,border:`1px solid ${C.alert}44`,borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:11,color:C.alert,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>
+                          🗑 Delete
+                        </button>
+                      )}
+                    </div>
+                  </>
                 )}
               </div>
             </div>
