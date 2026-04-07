@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import {
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
-  GoogleAuthProvider, signInWithPopup,
+  GoogleAuthProvider, signInWithRedirect, getRedirectResult,
   signOut, onAuthStateChanged, updateProfile
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
@@ -149,33 +149,18 @@ function AuthScreen({onAuth}) {
 
   const isOwnerEmail = email.trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
 
-  // ── Google Sign-In ───────────────────────────────────────────────────────
+  // ── Google Sign-In (redirect — works on all phones) ──────────────────────
   const signInWithGoogle = async () => {
     setErr(""); setLoading(true);
     try {
       const provider = new GoogleAuthProvider();
-      const cred = await signInWithPopup(auth, provider);
-      const user  = cred.user;
-      const isOwner = user.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
-      // Check if profile already exists
-      const snap = await new Promise(res => onValue(ref(db,`workers/${user.uid}`), res, {onlyOnce:true}));
-      if(!snap.val()) {
-        // First time — create profile
-        const profile = {
-          id: user.uid, name: user.displayName||user.email,
-          role: isOwner ? "Owner" : "Crew Member",
-          color: isOwner ? C.goldBright : WORKER_COLORS[Math.floor(Math.random()*WORKER_COLORS.length)],
-          email: user.email, isOwner,
-          online: true, joinedAt: Date.now(),
-        };
-        await set(ref(db,`workers/${user.uid}`), profile);
-        onAuth(profile);
-      }
-      // If profile exists, onAuthStateChanged in main app handles it
+      provider.setCustomParameters({ prompt: "select_account" });
+      await signInWithRedirect(auth, provider);
+      // Page will redirect to Google and come back automatically
     } catch(e) {
-      if(e.code !== "auth/popup-closed-by-user") setErr("Google sign-in failed. Please try again.");
+      setErr("Google sign-in failed. Please try again.");
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // ── Email/Password ───────────────────────────────────────────────────────
@@ -782,12 +767,32 @@ export default function DAWWApp() {
   const [workers,setWorkers]   = useState([]);
   const [connected,setConnected] = useState(false);
 
-  // Auth listener
+  // Auth listener + handle Google redirect result on return
   useEffect(()=>{
     if(!auth) { setAuthReady(true); return; }
+
+    // Handle Google redirect sign-in return
+    getRedirectResult(auth).then(async result => {
+      if(result?.user) {
+        const user = result.user;
+        const isOwner = user.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
+        const snap = await new Promise(res => onValue(ref(db,`workers/${user.uid}`), res, {onlyOnce:true}));
+        if(!snap.val()) {
+          const profile = {
+            id: user.uid,
+            name: user.displayName || user.email.split("@")[0],
+            role: isOwner ? "Owner" : "Crew Member",
+            color: isOwner ? C.goldBright : WORKER_COLORS[Math.floor(Math.random()*WORKER_COLORS.length)],
+            email: user.email, isOwner,
+            online: true, joinedAt: Date.now(),
+          };
+          await set(ref(db,`workers/${user.uid}`), profile);
+        }
+      }
+    }).catch(e => console.warn("Redirect result:", e));
+
     return onAuthStateChanged(auth, async user=>{
       if(user) {
-        // load profile from db
         onValue(ref(db,`workers/${user.uid}`), snap=>{
           const profile = snap.val();
           if(profile) {
