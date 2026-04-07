@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// DAWW CREATIONS — Firebase Messaging Service Worker
-// This file MUST be placed in your project's PUBLIC folder (public/firebase-messaging-sw.js)
-// It enables background push notifications on Android and iPhone
+// DAWW CREATIONS — Firebase Messaging Service Worker v2
+// Location: public/firebase-messaging-sw.js
+// VAPID Key: BM6ffPvncvHzgrIHaJcmArzKFHQWC92NQhUmWeavPKhAoyHYexYQo_eFW_b5Zz6RW65JdI5tcSjAhI2GPN9hAq0
+// Enables background push notifications on Android and iPhone
 // ─────────────────────────────────────────────────────────────────────────────
 
 importScripts("https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js");
@@ -26,12 +27,17 @@ messaging.onBackgroundMessage((payload) => {
   const { title, body, icon } = payload.notification || {};
 
   self.registration.showNotification(title || "DAWW CREATIONS", {
-    body:    body    || "You have a new notification",
-    icon:    icon    || "/favicon.ico",
-    badge:   "/favicon.ico",
-    vibrate: [200, 100, 200],
-    data:    payload.data || {},
-    actions: [{ action: "open", title: "Open App" }],
+    body:             body || "You have a new update",
+    icon:             icon || "/favicon.ico",
+    badge:            "/favicon.ico",
+    vibrate:          [200, 100, 200, 100, 200],
+    data:             payload.data || {},
+    requireInteraction: false,
+    silent:           false,
+    actions: [
+      { action: "open",    title: "Open App" },
+      { action: "dismiss", title: "Dismiss"  },
+    ],
   });
 });
 
