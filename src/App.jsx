@@ -64,43 +64,63 @@ const todayISO = () => new Date().toISOString().split("T")[0];
 const uid = () => Math.random().toString(36).slice(2,10);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PUSH NOTIFICATIONS — Service Worker based (works on Android + iPhone)
+// PUSH NOTIFICATIONS — FCM + Service Worker + VAPID
+// Works on Android (Chrome) and iPhone (Safari, added to Home Screen)
 // ─────────────────────────────────────────────────────────────────────────────
+const VAPID_KEY = "BM6ffPvncvHzgrIHaJcmArzKFHQWC92NQhUmWeavPKhAoyHYexYQo_eFW_b5Zz6RW65JdI5tcSjAhI2GPN9hAq0";
 
-// Register the service worker on load
+// Register service worker immediately
 if("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/firebase-messaging-sw.js")
-    .then(reg => console.log("SW registered:", reg.scope))
-    .catch(err => console.warn("SW registration failed:", err));
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/firebase-messaging-sw.js")
+      .then(reg => console.log("✅ DAWW SW registered:", reg.scope))
+      .catch(err => console.warn("SW failed:", err));
+  });
 }
 
+// Request permission AND get FCM token so Firebase can push to this device
 async function requestNotificationPermission() {
   if(!("Notification" in window)) return false;
-  if(Notification.permission === "granted") return true;
   if(Notification.permission === "denied") return false;
-  const result = await Notification.requestPermission();
-  return result === "granted";
+  try {
+    const permission = await Notification.requestPermission();
+    if(permission !== "granted") return false;
+    // Try to get FCM token for full cloud push (optional — works without it too)
+    try {
+      const { getMessaging, getToken } = await import(
+        "https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging.js"
+      );
+      const messaging = getMessaging();
+      const token = await getToken(messaging, { vapidKey: VAPID_KEY });
+      if(token) console.log("FCM token:", token);
+    } catch(e) {
+      console.log("FCM token skipped (still works locally):", e.message);
+    }
+    return true;
+  } catch(e) {
+    console.warn("Permission error:", e);
+    return false;
+  }
 }
 
-// Show a local notification via the Service Worker (works in background on Android)
+// Show notification via Service Worker — works in background on Android & iPhone
 async function sendNotification(title, body) {
   if(!("Notification" in window)) return;
   if(Notification.permission !== "granted") return;
   try {
-    // Use service worker to show notification — works in background
     if("serviceWorker" in navigator) {
       const reg = await navigator.serviceWorker.ready;
       await reg.showNotification(title, {
         body,
-        icon: "/favicon.ico",
-        badge: "/favicon.ico",
+        icon:    "/favicon.ico",
+        badge:   "/favicon.ico",
         vibrate: [200, 100, 200],
-        tag: title,
+        tag:     title,
         renotify: false,
         requireInteraction: false,
+        silent: false,
       });
     } else {
-      // Fallback for browsers without SW support
       const n = new Notification(title, { body, icon: "/favicon.ico" });
       setTimeout(() => n.close(), 6000);
     }
