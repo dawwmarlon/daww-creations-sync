@@ -106,12 +106,15 @@ function DAWWLogo({size=32}) {
   );
 }
 
-function Avatar({name="?", color=C.taupe, size=34, isOwner=false}) {
+function Avatar({name="?", color=C.taupe, size=34, isOwner=false, isAdmin=false}) {
   const i = (name||"?").split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+  const borderCol = isOwner ? C.goldBright : isAdmin ? C.purple : color;
+  const bgCol     = isOwner ? C.gold       : isAdmin ? C.purple : color;
   return (
     <div style={{position:"relative",flexShrink:0}}>
-      <div style={{width:size,height:size,borderRadius:"50%",background:`${isOwner?C.gold:color}22`,border:`2px solid ${isOwner?C.goldBright:color}88`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.33,fontWeight:700,color:isOwner?C.goldBright:color,fontFamily:"'DM Mono',monospace",boxShadow:isOwner?`0 0 10px ${C.goldGlow}`:"none"}}>{i}</div>
+      <div style={{width:size,height:size,borderRadius:"50%",background:`${bgCol}22`,border:`2px solid ${borderCol}88`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.33,fontWeight:700,color:borderCol,fontFamily:"'DM Mono',monospace",boxShadow:isOwner?`0 0 10px ${C.goldGlow}`:isAdmin?`0 0 8px ${C.purple}44`:"none"}}>{i}</div>
       {isOwner && <div style={{position:"absolute",top:-4,right:-4,fontSize:9}}>👑</div>}
+      {!isOwner && isAdmin && <div style={{position:"absolute",top:-4,right:-4,fontSize:9}}>🛡️</div>}
     </div>
   );
 }
@@ -624,7 +627,7 @@ function ChatView({me, messages, setMessages, isOwner}) {
 // ─────────────────────────────────────────────────────────────────────────────
 // OWNER DASHBOARD
 // ─────────────────────────────────────────────────────────────────────────────
-function OwnerDashboard({me, tasks, setTasks, workers, setWorkers, messages, setMessages}) {
+function OwnerDashboard({me, tasks, setTasks, workers, setWorkers, messages, setMessages, isOwner=false}) {
   const [showAdd,setShowAdd] = useState(false);
   const [f,setF] = useState({title:"",pri:"high",project:"Operations",assignee:"",deadline:"",delivery:"",note:""});
   const [announce,setAnnounce] = useState("");
@@ -793,29 +796,124 @@ function OwnerDashboard({me, tasks, setTasks, workers, setWorkers, messages, set
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
           <div style={{fontSize:11,color:C.taupe,fontWeight:700,letterSpacing:1.5,fontFamily:"'DM Mono',monospace"}}>👥 TEAM MANAGEMENT</div>
           <button onClick={cleanupDuplicates} style={{background:`${C.purple}22`,border:`1px solid ${C.purple}44`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,color:C.purple,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>
-            🧹 Remove Duplicates
+            🧹 Duplicates
           </button>
         </div>
-        <div style={{fontSize:11,color:C.textMuted,marginBottom:10}}>
-          {workers.length} member{workers.length!==1?"s":""} registered
-        </div>
-        {workers.map((w,i)=>(
-          <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:C.bg,borderRadius:8,border:`1px solid ${w.isOwner||w.name===OWNER_NAME?C.goldBright+"33":C.border}`,marginBottom:6}}>
-            <Avatar name={w.name} color={w.color||C.taupe} size={30} isOwner={w.isOwner||w.name===OWNER_NAME}/>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:12,fontWeight:700,color:C.text}}>{w.name}</div>
-              <div style={{fontSize:10,color:C.textMuted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{w.role}{w.email?` · ${w.email}`:""}</div>
+
+        {/* Role legend */}
+        <div style={{display:"flex",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+          {[["👑","Owner","full control",C.goldBright],["🛡️","Admin","can manage tasks & team",C.purple],["👷","Worker","standard access",C.taupe]].map(([icon,label,desc,col])=>(
+            <div key={label} style={{display:"flex",alignItems:"center",gap:5}}>
+              <span style={{fontSize:11}}>{icon}</span>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:col}}>{label}</div>
+                <div style={{fontSize:9,color:C.textMuted}}>{desc}</div>
+              </div>
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-              <div style={{width:7,height:7,borderRadius:"50%",background:w.online?C.green:C.textMuted}}/>
-              {(!w.isOwner&&w.name!==OWNER_NAME&&w.email!==OWNER_EMAIL) && (
-                <button onClick={()=>removeWorker(w)} style={{background:C.alertDim,border:`1px solid ${C.alert}33`,borderRadius:6,padding:"5px 10px",cursor:"pointer",fontSize:11,color:C.alert,fontWeight:700}}>Remove</button>
+          ))}
+        </div>
+
+        <div style={{fontSize:11,color:C.textMuted,marginBottom:10}}>
+          {workers.length} member{workers.length!==1?"s":""} · tap a worker to manage
+        </div>
+
+        {workers.map((w,i)=>{
+          const wIsOwner = w.isOwner||w.name===OWNER_NAME||w.email===OWNER_EMAIL;
+          const wIsAdmin = w.isAdmin && !wIsOwner;
+          const borderCol = wIsOwner?C.goldBright+"44":wIsAdmin?C.purple+"44":C.border;
+          return (
+            <div key={i} style={{background:C.bg,borderRadius:10,border:`1px solid ${borderCol}`,marginBottom:8,overflow:"hidden"}}>
+              {/* Worker header */}
+              <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px"}}>
+                <Avatar name={w.name} color={w.color||C.taupe} size={32} isOwner={wIsOwner} isAdmin={wIsAdmin}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span style={{fontSize:13,fontWeight:700,color:C.text}}>{w.name}</span>
+                    {wIsOwner && <span style={{fontSize:9,fontWeight:800,color:C.goldBright,background:`${C.goldBright}18`,border:`1px solid ${C.goldBright}33`,borderRadius:4,padding:"1px 6px",fontFamily:"'DM Mono',monospace"}}>OWNER</span>}
+                    {wIsAdmin && <span style={{fontSize:9,fontWeight:800,color:C.purple,background:`${C.purple}18`,border:`1px solid ${C.purple}33`,borderRadius:4,padding:"1px 6px",fontFamily:"'DM Mono',monospace"}}>ADMIN</span>}
+                  </div>
+                  <div style={{fontSize:11,color:C.textMuted,marginTop:2}}>{w.role}</div>
+                  {w.title && <div style={{fontSize:11,color:C.taupe,marginTop:1,fontStyle:"italic"}}>"{w.title}"</div>}
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                  <div style={{width:7,height:7,borderRadius:"50%",background:w.online?C.green:C.textMuted}}/>
+                </div>
+              </div>
+
+              {/* Owner controls — not shown for owner themselves */}
+              {!wIsOwner && (
+                <div style={{borderTop:`1px solid ${C.border}`,padding:"8px 12px",display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+
+                  {/* Admin toggle */}
+                  <button onClick={()=>{
+                    const updated = {...w, isAdmin: !w.isAdmin};
+                    if(db) update(ref(db,`workers/${w.id}`),{isAdmin:!w.isAdmin});
+                    else setWorkers(ws=>ws.map(x=>x.id===w.id?updated:x));
+                  }} style={{
+                    padding:"5px 12px",borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer",
+                    background:wIsAdmin?`${C.purple}22`:`${C.purple}11`,
+                    border:`1px solid ${wIsAdmin?C.purple:C.purple+"44"}`,
+                    color:wIsAdmin?C.purple:C.textMuted,
+                    fontFamily:"'DM Mono',monospace",
+                  }}>
+                    {wIsAdmin?"🛡️ Remove Admin":"🛡️ Make Admin"}
+                  </button>
+
+                  {/* Title editor */}
+                  <TitleEditor worker={w} onSave={(title)=>{
+                    if(db) update(ref(db,`workers/${w.id}`),{title});
+                    else setWorkers(ws=>ws.map(x=>x.id===w.id?{...x,title}:x));
+                  }}/>
+
+                  {/* Remove worker */}
+                  {w.email!==OWNER_EMAIL && (
+                    <button onClick={()=>removeWorker(w)} style={{marginLeft:"auto",background:C.alertDim,border:`1px solid ${C.alert}33`,borderRadius:7,padding:"5px 10px",cursor:"pointer",fontSize:11,color:C.alert,fontWeight:700}}>
+                      Remove
+                    </button>
+                  )}
+                </div>
               )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TITLE EDITOR — inline editable title for workers
+// ─────────────────────────────────────────────────────────────────────────────
+function TitleEditor({worker, onSave}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal]         = useState(worker.title||"");
+
+  const save = () => {
+    onSave(val.trim());
+    setEditing(false);
+  };
+
+  if(editing) return (
+    <div style={{display:"flex",gap:6,alignItems:"center",flex:1}}>
+      <input value={val} onChange={e=>setVal(e.target.value)}
+        onKeyDown={e=>{ if(e.key==="Enter") save(); if(e.key==="Escape") setEditing(false); }}
+        placeholder="e.g. Lead Electrician"
+        autoFocus
+        style={{flex:1,background:C.surfaceHigh,border:`1px solid ${C.purple}66`,borderRadius:7,padding:"5px 10px",fontSize:12,color:C.text,outline:"none",minWidth:0}}/>
+      <button onClick={save} style={{background:`${C.green}22`,border:`1px solid ${C.green}44`,borderRadius:6,padding:"5px 10px",cursor:"pointer",fontSize:11,color:C.green,fontWeight:700}}>✓</button>
+      <button onClick={()=>setEditing(false)} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:6,padding:"5px 8px",cursor:"pointer",fontSize:11,color:C.textMuted}}>✕</button>
+    </div>
+  );
+
+  return (
+    <button onClick={()=>{setVal(worker.title||"");setEditing(true);}} style={{
+      padding:"5px 12px",borderRadius:7,fontSize:11,fontWeight:600,cursor:"pointer",
+      background:"transparent",border:`1px solid ${C.border}`,
+      color:worker.title?C.taupeLight:C.textMuted,
+      fontStyle:worker.title?"italic":"normal",
+    }}>
+      {worker.title?`"${worker.title}"` : "📛 Set Title"}
+    </button>
   );
 }
 
@@ -1077,18 +1175,30 @@ export default function DAWWApp() {
 
   if(!me) return <AuthScreen onAuth={p=>{setMe(p);setView(p.isOwner?"owner":"dashboard");}}/>;
 
-  const isOwner = me.isOwner||me.name===OWNER_NAME;
+  const isOwner = me.isOwner||me.name===OWNER_NAME||me.email===OWNER_EMAIL;
+  const isAdmin  = me.isAdmin && !isOwner;
+  const hasAdminAccess = isOwner || isAdmin; // both can access owner/admin dashboard
   const openTasks = tasks.filter(t=>!t.done).length;
   const doneTasks = tasks.filter(t=>t.done).length;
   const pct = tasks.length?Math.round((doneTasks/tasks.length)*100):0;
   const pinned = messages.filter(m=>m.pinned);
 
-  const nav = isOwner
-    ? [{id:"owner",label:"Owner",icon:"👑"},{id:"tasks",label:"Tasks",icon:"✓",badge:openTasks||null},{id:"chat",label:"Chat",icon:"◉"},{id:"calendar",label:"Calendar",icon:"📅"}]
-    : [{id:"dashboard",label:"Home",icon:"⌂"},{id:"tasks",label:"Tasks",icon:"✓",badge:openTasks||null},{id:"chat",label:"Chat",icon:"◉"},{id:"calendar",label:"Calendar",icon:"📅"}];
+  const nav = hasAdminAccess
+    ? [
+        {id:"owner",   label: isOwner?"Owner":"Admin", icon: isOwner?"👑":"🛡️"},
+        {id:"tasks",   label:"Tasks",    icon:"✓",  badge:openTasks||null},
+        {id:"chat",    label:"Chat",     icon:"◉"},
+        {id:"calendar",label:"Calendar", icon:"📅"},
+      ]
+    : [
+        {id:"dashboard",label:"Home",     icon:"⌂"},
+        {id:"tasks",    label:"Tasks",    icon:"✓",  badge:openTasks||null},
+        {id:"chat",     label:"Chat",     icon:"◉"},
+        {id:"calendar", label:"Calendar", icon:"📅"},
+      ];
 
-  const accentColor = isOwner?C.goldBright:C.redBright;
-  const accentGlow  = isOwner?C.goldGlow:C.redGlow;
+  const accentColor = isOwner?C.goldBright:isAdmin?C.purple:C.redBright;
+  const accentGlow  = isOwner?C.goldGlow:isAdmin?`${C.purple}44`:C.redGlow;
 
   return (
     <div style={{background:C.bg,minHeight:"100vh",maxWidth:480,margin:"0 auto",fontFamily:"'Sora',sans-serif",color:C.text,display:"flex",flexDirection:"column"}}>
@@ -1110,7 +1220,7 @@ export default function DAWWApp() {
           <div style={{animation:"goldglow 3s infinite"}}><DAWWLogo size={30}/></div>
           <div>
             <div style={{fontSize:13,fontWeight:800,letterSpacing:1.5,textTransform:"uppercase"}}>DAWW <span style={{color:accentColor}}>CREATIONS</span></div>
-            <div style={{fontSize:9,color:isOwner?C.goldBright:C.textMuted,letterSpacing:2,fontFamily:"'DM Mono',monospace"}}>{isOwner?"👑 OWNER MODE":"TEAM SYNC"}</div>
+            <div style={{fontSize:9,color:isOwner?C.goldBright:isAdmin?C.purple:C.textMuted,letterSpacing:2,fontFamily:"'DM Mono',monospace"}}>{isOwner?"👑 OWNER MODE":isAdmin?"🛡️ ADMIN MODE":"TEAM SYNC"}</div>
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -1153,7 +1263,7 @@ export default function DAWWApp() {
       <div style={{flex:1,overflowY:view==="chat"?"hidden":"auto",display:"flex",flexDirection:"column"}}>
 
         {/* OWNER */}
-        {view==="owner"&&isOwner&&<OwnerDashboard me={me} tasks={tasks} setTasks={setTasks} workers={workers} setWorkers={setWorkers} messages={messages} setMessages={setMessages}/>}
+        {view==="owner"&&hasAdminAccess&&<OwnerDashboard me={me} tasks={tasks} setTasks={setTasks} workers={workers} setWorkers={setWorkers} messages={messages} setMessages={setMessages} isOwner={isOwner}/>}
 
         {/* DASHBOARD */}
         {view==="dashboard"&&(
